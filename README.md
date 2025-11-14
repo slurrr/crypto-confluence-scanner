@@ -1,27 +1,12 @@
 # crypto-confluence-scanner
 📈 Confluence Score Crypto Scanner
 
-A modular Python-based crypto market scanner that analyzes trend quality, volume behavior, volatility compression, relative strength, and positioning to compute a Confluence Score and identify high-probability swing trading setups.
-
-The system is designed to be:
-
-Exchange-agnostic (Binance, Coinbase, Apex Omni, CCXT, REST)
-
-Configurable (thresholds, weights, scoring formulas in config.yaml)
-
-Extensible (supports crypto now, equities/futures later)
-
-Modular (clean separation of data layer, features, scoring, patterns, ranking, alerts, reports)
-
-Research-driven (architecture based on Deep Research analysis of Williams, Minervini, Raschke, O’Neil, etc.)
+A modular Python-based crypto market scanner that computes a Confluence Score using trend, volume, volatility, relative strength, and positioning metrics.
+Designed for swing trading setups and multi-timeframe analysis.
 
 🚀 Project Status
 
-Architecture complete.
-Implementation in progress.
-
-This repository currently includes the full folder structure and placeholders for all modules.
-Features, scoring logic, data gateway, and ranking components will be implemented iteratively.
+Architecture complete — implementation in progress.
 
 🧱 Directory Structure (High-Level)
 src/
@@ -39,14 +24,25 @@ scripts/
 tests/
 
 
-Each module is responsible for a specific layer of the pipeline (data ingest → features → scoring → pattern detection → ranking → alerts + reporting).
+Each module corresponds to one stage of the pipeline:
+
+data ingest → features → scoring → pattern detection → ranking → alerts → reporting
 
 📦 Installation
+
+Clone the repository:
+
 git clone https://github.com/<yourname>/<reponame>.git
 cd <reponame>
 
+
+Create a virtual environment:
+
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+
+
+Install dependencies:
 
 pip install -r requirements.txt
 
@@ -60,12 +56,12 @@ bash scripts/run_scan.sh
 
 ⚙️ Configuration
 
-All tunable scoring parameters, thresholds, exchange settings, and universe definitions live in:
+All scoring thresholds, exchange settings, and universe definitions live in:
 
 config.yaml
 
 
-This makes the scoring model fully tweakable without changing code.
+This makes the entire scoring model fully tweakable without changing code.
 
 🧪 Tests
 
@@ -74,12 +70,9 @@ Tests will live under:
 tests/
 
 
-and can be run with:
+Run them with:
 
 pytest
-
-
-(once added)
 
 📜 License
 
