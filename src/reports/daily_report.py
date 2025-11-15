@@ -43,7 +43,7 @@ def format_console_table(ranked: List[RankedSymbol]) -> str:
     lines: List[str] = []
 
     header = (
-        "Rank  Symbol       CS    Trend   Vol   Volu    RS    ATR%   BBW%    1M%    3M%    6M%"
+        "Rank  Symbol       CS    Trend   Vol   Volu    RS    Pos   ATR%   BBW%    1M%    3M%    6M%"
     )
     sep = "-" * len(header)
     lines.append(sep)
@@ -62,6 +62,7 @@ def format_console_table(ranked: List[RankedSymbol]) -> str:
             f"{_fmt_num(comps.volatility, 1):>5}  "
             f"{_fmt_num(comps.volume, 1):>5}  "
             f"{_fmt_num(comps.rs, 1):>6}  "
+            f"{_fmt_num(comps.positioning, 1):>6}  "
             f"{_fmt_num(extras['atr_pct'], 1):>6}  "
             f"{_fmt_num(extras['bb_width_pct'], 1):>6}  "
             f"{_fmt_num(extras['ret_1m'], 1):>6}  "
@@ -104,6 +105,7 @@ def build_markdown_report(
     lines.append("")
     lines.append("- **CS** = Confluence Score (0–100)")
     lines.append("- **Trend / Vol / Volu / RS** = component scores (0–100)")
+    lines.append("- **Pos** = Positioning / derivatives crowding score (0–100)")
     lines.append("- **ATR%** = ATR(14) as % of price")
     lines.append("- **BBW%** = Bollinger Band width as % of mid")
     lines.append("- **1M/3M/6M%** = approximate returns over 20/60/120 bars")
@@ -113,10 +115,10 @@ def build_markdown_report(
 
     # Table header
     lines.append(
-        "| # | Symbol | CS | Trend | Vol | Volu | RS | ATR% | BBW% | 1M% | 3M% | 6M% |"
+        "| # |  Symbol  |  CS  |  Trend  |  Vol  |  Volu  |  RS  |  Pos  |  ATR%  |  BBW%  |  1M%  |  3M%  |  6M%  |"
     )
     lines.append(
-        "|:-:|:------:|:--:|:-----:|:---:|:----:|:--:|:----:|:----:|:---:|:---:|:---:|"
+        "|:-:|:------:|:--:|:-----:|:---:|:----:|:--:|:---:|:----:|:----:|:---:|:---:|:---:|"
     )
 
     for idx, r in enumerate(ranked, start=1):
@@ -131,6 +133,7 @@ def build_markdown_report(
             f"| {_fmt_num(comps.volatility, 1)} "
             f"| {_fmt_num(comps.volume, 1)} "
             f"| {_fmt_num(comps.rs, 1)} "
+            f"| {_fmt_num(comps.positioning, 1)} "
             f"| {_fmt_num(extras['atr_pct'], 1)} "
             f"| {_fmt_num(extras['bb_width_pct'], 1)} "
             f"| {_fmt_num(extras['ret_1m'], 1)} "
@@ -178,8 +181,6 @@ def generate_daily_report(
     - print a nice console table
     - write a markdown file
     """
-    from ..ranking.ranking import rank_universe  # avoid circular import
-
     run_dt = datetime.utcnow()
     reports_cfg = cfg.get("reports", {})
     top_n = int(reports_cfg.get("top_n", 10))
