@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 from .exchange_api import ExchangeAPI
 from .models import Bar, SymbolMeta, DerivativesMetrics, MarketHealth

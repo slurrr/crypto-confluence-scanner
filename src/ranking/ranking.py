@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
 
-from ..data.models import Bar, SymbolMeta
+from ..data.models import Bar, SymbolMeta, DerivativesMetrics
 from ..data.repository import DataRepository
 from ..scoring.trend_score import compute_trend_score, TrendScoreResult
 from ..scoring.volatility_score import (
@@ -72,7 +72,7 @@ def score_symbol(
         deriv = repo.fetch_derivatives(symbol_meta.symbol)
     except Exception as exc:
         print(f"[WARN] Failed to fetch derivatives for {symbol_meta.symbol}: {exc}")
-        deriv = repo.fetch_derivatives(symbol_meta.symbol)  # or a default instance
+        deriv = DerivativesMetrics(symbol=symbol_meta.symbol)
     positioning = compute_positioning_score(deriv)
 
     conf = compute_confluence_score(

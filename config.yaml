@@ -9,16 +9,19 @@ exchange:
     - ZEC/USDT
     - LTC/USDT
 
+  derivatives:
+    id: binanceusdm     # CCXT id for Binance USDT-M futures
+
 ranking:
   max_symbols: 20   # cap how many symbols you scan per run
 
-filters:
-  min_trend_score: 25        # require at least moderate trend quality
-  min_rs_score: 20           # require at least moderate relative strength
-  min_volume_score: 30    # weed out the truly dead names
-  min_volatility_score: 0    # keep all for now, or raise if you want squeezes only
-  max_atr_pct: 25            # avoid super-crazy ATR%
-  max_bb_width_pct: 60       # avoid names with massive expansion
+#filters:
+#  min_trend_score: 25        # require at least moderate trend quality
+#  min_rs_score: 20           # require at least moderate relative strength
+#  min_volume_score: 30    # weed out the truly dead names
+#  min_volatility_score: 0    # keep all for now, or raise if you want squeezes only
+#  max_atr_pct: 25            # avoid super-crazy ATR%
+#  max_bb_width_pct: 60       # avoid names with massive expansion
 
   reports:
   top_n: 20

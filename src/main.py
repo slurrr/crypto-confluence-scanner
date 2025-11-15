@@ -10,7 +10,7 @@ try:
 except ImportError:
     yaml = None  # we handle this gracefully below
 
-from .data.exchange_api import DummyExchangeAPI, CcxtExchangeAPI
+from .data.exchange_api import CcxtExchangeAPI
 from .data.repository import DataRepository, DataRepositoryConfig
 
 
@@ -53,7 +53,14 @@ def build_repository(cfg: Dict[str, Any]) -> DataRepository:
     exchange_id = exchange_cfg.get("id", "binance")
     symbols = exchange_cfg.get("symbols")  # e.g. ["BTC/USDT", "ETH/USDT"]
 
-    api = CcxtExchangeAPI(exchange_id=exchange_id, symbols=symbols)
+    deriv_cfg = exchange_cfg.get("derivatives", {})
+    deriv_exchange_id = deriv_cfg.get("id")  # e.g. "binanceusdm"
+
+    api = CcxtExchangeAPI(
+        exchange_id=exchange_id,
+        symbols=symbols,
+        derivatives_exchange_id=deriv_exchange_id,
+    )
     return DataRepository(api=api, cfg=repo_cfg)
 
 
