@@ -19,3 +19,7 @@ filters:
   min_volatility_score: 0    # keep all for now, or raise if you want squeezes only
   max_atr_pct: 25            # avoid super-crazy ATR%
   max_bb_width_pct: 60       # avoid names with massive expansion
+
+  reports:
+  top_n: 20
+  output_dir: reports
