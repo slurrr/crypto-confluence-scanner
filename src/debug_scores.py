@@ -6,6 +6,7 @@ from typing import Any, Dict
 from .main import load_config, build_repository
 from .scoring.trend_score import compute_trend_score
 from .scoring.volatility_score import compute_volatility_score
+from .scoring.volume_score import compute_volume_score
 
 
 def compute_scores_for_first_symbol(cfg: Dict[str, Any]) -> None:
@@ -27,12 +28,16 @@ def compute_scores_for_first_symbol(cfg: Dict[str, Any]) -> None:
 
     trend = compute_trend_score(bars)
     vol = compute_volatility_score(bars)
+    volu = compute_volume_score(bars)
 
     logging.info("Trend score for %s: %.2f", symbol, trend.score)
     logging.info("Trend features: %s", trend.features)
 
     logging.info("Volatility score for %s: %.2f", symbol, vol.score)
     logging.info("Volatility features: %s", vol.features)
+
+    logging.info("Volume score for %s: %.2f", symbol, volu.score)
+    logging.info("Volume features: %s", volu.features)
 
 
 def main() -> None:
