@@ -1,4 +1,3 @@
-# crypto-confluence-scanner
 # 📈 Confluence Score Crypto Scanner
 
 A modular Python-based crypto market scanner that computes a **Confluence Score** using trend, volume, volatility, relative strength, and positioning metrics.  
