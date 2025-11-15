@@ -5,11 +5,15 @@ from typing import Any, Dict, List, Sequence
 
 from ..data.models import Bar, SymbolMeta
 from ..data.repository import DataRepository
-from ..scoring.trend_score import compute_trend_score
-from ..scoring.volatility_score import compute_volatility_score
-from ..scoring.volume_score import compute_volume_score
-from ..scoring.rs_score import compute_relative_strength_score
+from ..scoring.trend_score import compute_trend_score, TrendScoreResult
+from ..scoring.volatility_score import compute_volatility_score, VolatilityScoreResult
+from ..scoring.volume_score import compute_volume_score, VolumeScoreResult
+from ..scoring.rs_score import (
+    compute_relative_strength_score,
+    RelativeStrengthScoreResult,
+)
 from ..scoring.confluence import compute_confluence_score, ConfluenceScoreResult
+from .filters import apply_filters
 
 
 @dataclass
@@ -17,6 +21,10 @@ class RankedSymbol:
     symbol: str
     timeframe: str
     confluence: ConfluenceScoreResult
+    trend: TrendScoreResult
+    volatility: VolatilityScoreResult
+    volume: VolumeScoreResult
+    rs: RelativeStrengthScoreResult
     bars: Sequence[Bar]
     meta: SymbolMeta
 
@@ -35,7 +43,6 @@ def score_symbol(
     try:
         bars = repo.fetch_ohlcv(symbol_meta.symbol, timeframe, limit=bar_limit)
     except Exception as exc:
-        # In production you'd want structured logging here.
         print(f"[WARN] Failed to fetch bars for {symbol_meta.symbol}: {exc}")
         return None
 
@@ -61,6 +68,10 @@ def score_symbol(
         symbol=symbol_meta.symbol,
         timeframe=timeframe,
         confluence=conf,
+        trend=trend,
+        volatility=vol,
+        volume=volu,
+        rs=rs,
         bars=bars,
         meta=symbol_meta,
     )
@@ -72,12 +83,8 @@ def rank_universe(
     top_n: int = 10,
 ) -> List[RankedSymbol]:
     """
-    Score and rank symbols in the universe by Confluence Score.
-
-    Uses:
-      - universe from repo.discover_universe()
-      - first timeframe from cfg["timeframes"]
-      - optional cfg["ranking"]["max_symbols"] to limit the scan
+    Score and rank symbols in the universe by Confluence Score,
+    then apply filters and return top_n.
     """
     universe = repo.discover_universe()
     if not universe:
@@ -86,9 +93,9 @@ def rank_universe(
 
     timeframe = cfg.get("timeframes", ["1d"])[0]
     ranking_cfg = cfg.get("ranking", {})
+    filter_cfg = cfg.get("filters", {})
     max_symbols = ranking_cfg.get("max_symbols", 20)
 
-    # To avoid hammering the API while experimenting, we can cap the universe
     symbols_to_scan = universe[:max_symbols]
 
     ranked: List[RankedSymbol] = []
@@ -98,7 +105,10 @@ def rank_universe(
         if r is not None:
             ranked.append(r)
 
-    # Sort descending by confluence score
-    ranked.sort(key=lambda r: r.confluence.confluence_score, reverse=True)
+    # Apply filters
+    filtered = apply_filters(ranked, filter_cfg)
 
-    return ranked[:top_n]
+    # Sort descending by confluence score
+    filtered.sort(key=lambda r: r.confluence.confluence_score, reverse=True)
+
+    return filtered[:top_n]
