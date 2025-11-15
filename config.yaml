@@ -2,7 +2,12 @@ timeframes:
   - 1d
 
 exchange:
-  id: binance          # CCXT exchange id
+  id: binance
   symbols:
     - BTC/USDT
     - ETH/USDT
+    - ZEC/USDT
+    - LTC/USDT
+
+ranking:
+  max_symbols: 20   # cap how many symbols you scan per run
