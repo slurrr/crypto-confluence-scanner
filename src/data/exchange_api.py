@@ -209,9 +209,14 @@ class CcxtExchangeAPI(ExchangeAPI):
 
     def get_derivatives_metrics(self, symbol: str) -> DerivativesMetrics:
         """
-        Fetch funding and open interest (if available) from the derivatives
-        exchange. If anything fails, we just return what we have without
-        crashing the pipeline.
+        Fetch funding, open interest, and approximate OI % change from the
+        derivatives exchange.
+
+        - funding_rate: current funding (per interval, decimal)
+        - open_interest: current OI (contracts or notional, exchange-specific)
+        - oi_change: % change in OI over recent history (last vs first)
+
+        If anything isn't available, we just leave that field as None.
         """
         # If no derivatives client configured, return empty metrics.
         if self._deriv_exchange is None:
@@ -219,11 +224,12 @@ class CcxtExchangeAPI(ExchangeAPI):
 
         deriv_symbol = self._map_to_deriv_symbol(symbol)
         if deriv_symbol is None:
-            # Can't map this symbol to a futures contract
+            # Can't map this spot symbol to a futures contract
             return DerivativesMetrics(symbol=symbol)
 
         funding_rate: Optional[float] = None
         open_interest: Optional[float] = None
+        oi_change_pct: Optional[float] = None
 
         # --- Funding rate ---
         try:
@@ -239,10 +245,12 @@ class CcxtExchangeAPI(ExchangeAPI):
                     or fr.get("fundingRateDaily")
                     or fr.get("info", {}).get("fundingRate")
                 )
+                if funding_rate is not None:
+                    funding_rate = float(funding_rate)
         except Exception:
             pass
 
-        # --- Open interest ---
+        # --- Current open interest ---
         try:
             oi = None
             if hasattr(self._deriv_exchange, "fetchOpenInterest"):
@@ -256,13 +264,52 @@ class CcxtExchangeAPI(ExchangeAPI):
                     or oi.get("openInterestAmount")
                     or oi.get("info", {}).get("openInterest")
                 )
+                if open_interest is not None:
+                    open_interest = float(open_interest)
+        except Exception:
+            pass
+
+        # --- Open interest history -> % change ---
+        try:
+            hist = None
+            if hasattr(self._deriv_exchange, "fetchOpenInterestHistory"):
+                # Try daily history; 7–30 days is plenty for crowding signal
+                hist = self._deriv_exchange.fetchOpenInterestHistory(
+                    deriv_symbol,
+                    timeframe="1d",
+                    limit=14,
+                )
+            elif hasattr(self._deriv_exchange, "fetch_open_interest_history"):
+                hist = self._deriv_exchange.fetch_open_interest_history(
+                    deriv_symbol,
+                    timeframe="1d",
+                    limit=14,
+                )
+
+            if hist and len(hist) >= 2:
+                first = hist[0]
+                last = hist[-1]
+
+                def _extract_oi(entry: dict) -> Optional[float]:
+                    val = (
+                        entry.get("openInterest")
+                        or entry.get("openInterestAmount")
+                        or entry.get("info", {}).get("openInterest")
+                    )
+                    return float(val) if val is not None else None
+
+                oi_start = _extract_oi(first)
+                oi_end = _extract_oi(last)
+
+                if oi_start and oi_start > 0 and oi_end is not None:
+                    oi_change_pct = (oi_end / oi_start - 1.0) * 100.0
         except Exception:
             pass
 
         return DerivativesMetrics(
             symbol=symbol,
-            funding_rate=float(funding_rate) if funding_rate is not None else None,
-            open_interest=float(open_interest) if open_interest is not None else None,
+            funding_rate=funding_rate,
+            open_interest=open_interest,
             funding_z=None,
-            oi_change=None,
+            oi_change=oi_change_pct,
         )
