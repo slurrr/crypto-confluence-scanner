@@ -10,8 +10,9 @@ try:
 except ImportError:
     yaml = None  # we handle this gracefully below
 
-from data.exchange_api import DummyExchangeAPI
-from data.repository import DataRepository, DataRepositoryConfig
+from .data.exchange_api import DummyExchangeAPI, CcxtExchangeAPI
+from .data.repository import DataRepository, DataRepositoryConfig
+
 
 
 log = logging.getLogger(__name__)
@@ -47,8 +48,14 @@ def load_config(path: str | Path) -> Dict[str, Any]:
 def build_repository(cfg: Dict[str, Any]) -> DataRepository:
     timeframes: Sequence[str] = cfg.get("timeframes", ["1d"])
     repo_cfg = DataRepositoryConfig(timeframes=timeframes)
-    api = DummyExchangeAPI()
+
+    exchange_cfg = cfg.get("exchange", {})
+    exchange_id = exchange_cfg.get("id", "binance")
+    symbols = exchange_cfg.get("symbols")  # e.g. ["BTC/USDT", "ETH/USDT"]
+
+    api = CcxtExchangeAPI(exchange_id=exchange_id, symbols=symbols)
     return DataRepository(api=api, cfg=repo_cfg)
+
 
 
 def run_scan(config_path: str = "config.yaml") -> None:

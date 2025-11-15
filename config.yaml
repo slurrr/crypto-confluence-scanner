@@ -1,0 +1,8 @@
+timeframes:
+  - 1d
+
+exchange:
+  id: binance          # CCXT exchange id
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
