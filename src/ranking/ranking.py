@@ -6,13 +6,23 @@ from typing import Any, Dict, List, Sequence
 from ..data.models import Bar, SymbolMeta
 from ..data.repository import DataRepository
 from ..scoring.trend_score import compute_trend_score, TrendScoreResult
-from ..scoring.volatility_score import compute_volatility_score, VolatilityScoreResult
+from ..scoring.volatility_score import (
+    compute_volatility_score,
+    VolatilityScoreResult,
+)
 from ..scoring.volume_score import compute_volume_score, VolumeScoreResult
 from ..scoring.rs_score import (
     compute_relative_strength_score,
     RelativeStrengthScoreResult,
 )
-from ..scoring.confluence import compute_confluence_score, ConfluenceScoreResult
+from ..scoring.positioning_score import (
+    compute_positioning_score,
+    PositioningScoreResult,
+)
+from ..scoring.confluence import (
+    compute_confluence_score,
+    ConfluenceScoreResult,
+)
 from .filters import apply_filters
 
 
@@ -25,6 +35,7 @@ class RankedSymbol:
     volatility: VolatilityScoreResult
     volume: VolumeScoreResult
     rs: RelativeStrengthScoreResult
+    positioning: PositioningScoreResult
     bars: Sequence[Bar]
     meta: SymbolMeta
 
@@ -36,7 +47,7 @@ def score_symbol(
     bar_limit: int = 200,
 ) -> RankedSymbol | None:
     """
-    Fetch bars for a symbol and compute all component scores + confluence.
+    Fetch bars & derivatives for a symbol and compute all component scores + confluence.
 
     Returns None if there's an error or no bars.
     """
@@ -50,10 +61,19 @@ def score_symbol(
         print(f"[WARN] No bars for {symbol_meta.symbol}")
         return None
 
+    # Trend / Vol / Volume / RS from OHLCV
     trend = compute_trend_score(bars)
     vol = compute_volatility_score(bars)
     volu = compute_volume_score(bars)
     rs = compute_relative_strength_score(bars)
+
+    # Positioning / funding / OI from derivatives stream
+    try:
+        deriv = repo.fetch_derivatives(symbol_meta.symbol)
+    except Exception as exc:
+        print(f"[WARN] Failed to fetch derivatives for {symbol_meta.symbol}: {exc}")
+        deriv = repo.fetch_derivatives(symbol_meta.symbol)  # or a default instance
+    positioning = compute_positioning_score(deriv)
 
     conf = compute_confluence_score(
         symbol=symbol_meta.symbol,
@@ -62,6 +82,7 @@ def score_symbol(
         volatility_score=vol.score,
         volume_score=volu.score,
         rs_score=rs.score,
+        positioning_score=positioning.score,
     )
 
     return RankedSymbol(
@@ -72,6 +93,7 @@ def score_symbol(
         volatility=vol,
         volume=volu,
         rs=rs,
+        positioning=positioning,
         bars=bars,
         meta=symbol_meta,
     )

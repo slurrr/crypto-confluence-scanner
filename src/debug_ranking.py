@@ -20,7 +20,7 @@ def run_ranking(cfg: Dict[str, Any]) -> None:
         cs = r.confluence.confluence_score
         comps = r.confluence.components
         logging.info(
-            "%2d) %-12s CS: %6.2f | Trend: %6.2f | Vol: %6.2f | Volu: %6.2f | RS: %6.2f",
+            "%2d) %-12s CS: %6.2f | Trend: %6.2f | Vol: %6.2f | Volu: %6.2f | RS: %6.2f | Pos: %6.2f",
             idx,
             r.symbol,
             cs,
@@ -28,7 +28,9 @@ def run_ranking(cfg: Dict[str, Any]) -> None:
             comps.volatility,
             comps.volume,
             comps.rs,
+            comps.positioning,
         )
+
 
 
 def main() -> None:

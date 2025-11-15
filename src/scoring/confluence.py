@@ -10,6 +10,7 @@ class ComponentScores:
     volatility: float
     volume: float
     rs: float
+    positioning: float
 
 
 @dataclass
@@ -32,35 +33,37 @@ def compute_confluence_score(
     volatility_score: float,
     volume_score: float,
     rs_score: float,
+    positioning_score: float | None = None,
 ) -> ConfluenceScoreResult:
     """
-    First-pass Confluence Score.
+    First-pass Confluence Score including positioning.
 
-    Simple weighted blend of component scores, all assumed in [0,100].
-
-    You can later:
-      - adjust weights,
-      - condition on market regime,
-      - add positioning / funding / OI as extra components.
+    If positioning_score is None, we treat it as neutral (50).
     """
-    # Weights (tunable later)
-    w_trend = 0.35
-    w_volatility = 0.20
-    w_volume = 0.20
-    w_rs = 0.25
+    if positioning_score is None:
+        positioning_score = 50.0
 
     raw_components = {
         "trend": trend_score,
         "volatility": volatility_score,
         "volume": volume_score,
         "rs": rs_score,
+        "positioning": positioning_score,
     }
+
+    # Weights (tunable later); small but non-trivial weight on positioning.
+    w_trend = 0.32
+    w_volatility = 0.18
+    w_volume = 0.18
+    w_rs = 0.22
+    w_positioning = 0.10
 
     c_score = (
         w_trend * trend_score
         + w_volatility * volatility_score
         + w_volume * volume_score
         + w_rs * rs_score
+        + w_positioning * positioning_score
     )
 
     return ConfluenceScoreResult(
@@ -72,6 +75,7 @@ def compute_confluence_score(
             volatility=volatility_score,
             volume=volume_score,
             rs=rs_score,
+            positioning=positioning_score,
         ),
         raw_components=raw_components,
     )
