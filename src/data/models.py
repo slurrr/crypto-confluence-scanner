@@ -42,5 +42,5 @@ class DerivativesMetrics:
 class MarketHealth:
     """Snapshot of overall market regime."""
     regime: str  # e.g. "bull", "bear", "sideways", "unknown"
-    btc_trend_score: Optional[float] = None
-    breadth_score: Optional[float] = None
+    btc_trend: Optional[float] = None
+    breadth: Optional[float] = None
