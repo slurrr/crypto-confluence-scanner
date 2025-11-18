@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..ranking.ranking import rank_universe, RankedSymbol
+from ..data.models import MarketHealth
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +37,23 @@ def _extract_extras(r: RankedSymbol) -> Dict[str, float]:
     }
 
 
-def format_console_table(ranked: List[RankedSymbol]) -> str:
+def format_console_table(
+    ranked: List[RankedSymbol],
+    market_health: Optional[MarketHealth] = None,
+) -> str:
     """
     Build a visually nice, monospaced table for the terminal.
     """
     lines: List[str] = []
+
+    # Market regime header
+    if market_health is not None:
+        lines.append(
+            f"Market Regime: {market_health.regime.upper()} "
+            f"(BTC trend: {_fmt_num(market_health.btc_trend, 1)}, "
+            f"breadth: {_fmt_num(market_health.breadth, 1)}%)"
+        )
+        lines.append("")
 
     header = (
         "Rank  Symbol       CS    Trend   Vol   Volu    RS    Pos   ATR%   BBW%    1M%    3M%    6M%"
@@ -79,6 +92,7 @@ def build_markdown_report(
     ranked: List[RankedSymbol],
     cfg: Dict[str, Any],
     run_dt: datetime,
+    market_health: Optional[MarketHealth] = None,
 ) -> str:
     """
     Build a visually clean Markdown report for the top N symbols.
@@ -90,13 +104,26 @@ def build_markdown_report(
     lines: List[str] = []
 
     # Title + meta
-    lines.append(f"# 📊 Daily Confluence Report")
+    lines.append("# 📊 Daily Confluence Report")
     lines.append("")
-    lines.append(f"**Date:** {run_dt.strftime('%Y-%m-%d')}  ")
+    lines.append(f"**Date:** {run_dt.strftime('%Y-%m-%d %H:%M UTC')}  ")
     lines.append(f"**Timeframe:** {timeframe}  ")
     lines.append(f"**Exchange:** `{exchange_id}`  ")
     lines.append(f"**Top Symbols:** {top_n}")
     lines.append("")
+
+    # Market regime section
+    if market_health is not None:
+        lines.append("## 🧭 Market Regime")
+        lines.append("")
+        lines.append(f"- **Regime:** **{market_health.regime.upper()}**")
+        lines.append(
+            f"- **BTC Trend Score:** {_fmt_num(market_health.btc_trend, 1)}"
+        )
+        lines.append(
+            f"- **Breadth:** {_fmt_num(market_health.breadth, 1)}% of universe in uptrend"
+        )
+        lines.append("")
     lines.append("---")
     lines.append("")
 
@@ -104,8 +131,7 @@ def build_markdown_report(
     lines.append("**Legend**")
     lines.append("")
     lines.append("- **CS** = Confluence Score (0–100)")
-    lines.append("- **Trend / Vol / Volu / RS** = component scores (0–100)")
-    lines.append("- **Pos** = Positioning / derivatives crowding score (0–100)")
+    lines.append("- **Trend / Vol / Volu / RS / Pos** = component scores (0–100)")
     lines.append("- **ATR%** = ATR(14) as % of price")
     lines.append("- **BBW%** = Bollinger Band width as % of mid")
     lines.append("- **1M/3M/6M%** = approximate returns over 20/60/120 bars")
@@ -115,7 +141,7 @@ def build_markdown_report(
 
     # Table header
     lines.append(
-        "| # |  Symbol  |  CS  |  Trend  |  Vol  |  Volu  |  RS  |  Pos  |  ATR%  |  BBW%  |  1M%  |  3M%  |  6M%  |"
+        "| # | Symbol | CS | Trend | Vol | Volu | RS | Pos | ATR% | BBW% | 1M% | 3M% | 6M% |"
     )
     lines.append(
         "|:-:|:------:|:--:|:-----:|:---:|:----:|:--:|:---:|:----:|:----:|:---:|:---:|:---:|"
@@ -153,6 +179,7 @@ def write_markdown_report(
     ranked: List[RankedSymbol],
     cfg: Dict[str, Any],
     run_dt: datetime,
+    market_health: Optional[MarketHealth],
     output_dir: str | Path = "reports",
 ) -> Path:
     """
@@ -161,10 +188,11 @@ def write_markdown_report(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fname = f"daily_report_{run_dt.strftime('%Y-%m-%d')}.md"
+    # Timestamped filename so you keep every run
+    fname = f"daily_report_{run_dt.strftime('%Y-%m-%d_%H-%M')}.md"
     out_path = output_dir / fname
 
-    content = build_markdown_report(ranked, cfg, run_dt)
+    content = build_markdown_report(ranked, cfg, run_dt, market_health)
     out_path.write_text(content, encoding="utf-8")
 
     return out_path
@@ -177,6 +205,7 @@ def generate_daily_report(
     """
     Full daily report pipeline:
 
+    - compute market health / regime
     - run ranking (with filters)
     - print a nice console table
     - write a markdown file
@@ -186,6 +215,9 @@ def generate_daily_report(
     top_n = int(reports_cfg.get("top_n", 10))
     output_dir = reports_cfg.get("output_dir", "reports")
 
+    # 🧭 Market health / regime from repository
+    market_health = repo.compute_market_health()
+
     ranked = rank_universe(repo, cfg, top_n=top_n)
 
     if not ranked:
@@ -193,9 +225,15 @@ def generate_daily_report(
         return
 
     # Console table
-    table = format_console_table(ranked)
+    table = format_console_table(ranked, market_health)
     print("\n" + table + "\n")
 
     # Markdown file
-    out_path = write_markdown_report(ranked, cfg, run_dt, output_dir=output_dir)
+    out_path = write_markdown_report(
+        ranked,
+        cfg,
+        run_dt,
+        market_health,
+        output_dir=output_dir,
+    )
     log.info("Wrote daily report to %s", out_path)

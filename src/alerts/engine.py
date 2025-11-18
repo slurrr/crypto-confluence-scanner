@@ -115,6 +115,8 @@ def _build_symbol_alerts(
         alerts_cfg.get("rsi_divergence_max_bars_from_last", 1)
     )
     rsi_debug = bool(alerts_cfg.get("rsi_divergence_debug", False))
+    rsi_tz = alerts_cfg.get("rsi_divergence_timezone", "UTC")
+
 
 
     require_uptrend_regime = bool(alerts_cfg.get("require_uptrend_regime", False))
@@ -198,6 +200,7 @@ def _build_symbol_alerts(
                     min_strength=rsi_min_strength,
                     max_bars_from_last=rsi_max_bars_from_last,
                     debug=rsi_debug,
+                    tz=rsi_tz
                 )
 
 
