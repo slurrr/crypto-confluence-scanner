@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any, Dict, List
 
 
 @dataclass
@@ -44,3 +44,24 @@ class MarketHealth:
     regime: str  # e.g. "bull", "bear", "sideways", "unknown"
     btc_trend: Optional[float] = None
     breadth: Optional[float] = None
+
+
+
+@dataclass
+class ScoreBundle:
+    """
+    Container for all derived data for a symbol+timeframe snapshot.
+
+    - features: raw feature dict merged from all feature modules
+    - scores:   individual score components (trend, volume, etc.)
+    - confluence_score: final combined score
+    - patterns: any pattern labels / tags detected for this symbol
+    """
+    symbol: str
+    timeframe: str
+
+    features: Dict[str, Any] = field(default_factory=dict)
+    scores: Dict[str, float] = field(default_factory=dict)
+    confluence_score: float = 0.0
+    patterns: List[str] = field(default_factory=list)
+

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 
 @dataclass
@@ -21,61 +21,43 @@ class ConfluenceScoreResult:
     components: ComponentScores
     raw_components: Dict[str, float]
 
-
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 
 
 def compute_confluence_score(
-    symbol: str,
-    timeframe: str,
-    trend_score: float,
-    volatility_score: float,
-    volume_score: float,
-    rs_score: float,
-    positioning_score: float | None = None,
-) -> ConfluenceScoreResult:
+    scores: Dict[str, float],
+    *,
+    weights: Optional[Dict[str, float]] = None,
+    default_positioning: float = 50.0
+) -> Dict[str, float]:
     """
-    First-pass Confluence Score including positioning.
-
-    If positioning_score is None, we treat it as neutral (50).
+    Compute a weighted confluence score from individual component scores.
+    Returns {"confluence_score": float}
     """
-    if positioning_score is None:
-        positioning_score = 50.0
 
-    raw_components = {
-        "trend": trend_score,
-        "volatility": volatility_score,
-        "volume": volume_score,
-        "rs": rs_score,
-        "positioning": positioning_score,
+    # Normalize missing positioning like your old version did
+    if "positioning_score" not in scores or scores["positioning_score"] is None:
+        scores = {**scores, "positioning_score": default_positioning}
+
+    # Default weights (your original tuned version)
+    default_weights = {
+        "trend_score": 0.32,
+        "volatility_score": 0.18,
+        "volume_score": 0.18,
+        "rs_score": 0.22,
+        "positioning_score": 0.10,
     }
 
-    # Weights (tunable later); small but non-trivial weight on positioning.
-    w_trend = 0.32
-    w_volatility = 0.18
-    w_volume = 0.18
-    w_rs = 0.22
-    w_positioning = 0.10
+    # Allow overrides from config
+    w = weights or default_weights
 
-    c_score = (
-        w_trend * trend_score
-        + w_volatility * volatility_score
-        + w_volume * volume_score
-        + w_rs * rs_score
-        + w_positioning * positioning_score
-    )
+    # Weighted sum
+    c = 0.0
+    for k, weight in w.items():
+        c += weight * scores.get(k, 0.0)
 
-    return ConfluenceScoreResult(
-        symbol=symbol,
-        timeframe=timeframe,
-        confluence_score=_clamp(c_score),
-        components=ComponentScores(
-            trend=trend_score,
-            volatility=volatility_score,
-            volume=volume_score,
-            rs=rs_score,
-            positioning=positioning_score,
-        ),
-        raw_components=raw_components,
-    )
+    # Clamp 0 → 100 like your old function
+    c = max(0.0, min(100.0, c))
+
+    return {"confluence_score": c}

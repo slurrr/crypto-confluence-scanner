@@ -12,7 +12,7 @@ except ImportError:
 
 from .data.exchange_api import CcxtExchangeAPI
 from .data.repository import DataRepository, DataRepositoryConfig
-
+from .pipeline.score_pipeline import compile_score_bundles_for_universe 
 
 
 log = logging.getLogger(__name__)
@@ -73,24 +73,50 @@ def run_scan(config_path: str = "config.yaml") -> None:
     cfg = load_config(config_path)
     repo = build_repository(cfg)
 
+    # Discover the tradeable universe via the repository
     universe = repo.discover_universe()
-    log.info("Universe size: %d symbols", len(universe))
+    logging.info("Universe size: %d symbols", len(universe))
 
-    # Pick first timeframe for now
-    timeframe = cfg.get["data_repository"]("timeframes", ["1d"])[0]
-    max_symbols = cfg["data_repository"].get("max_symbols", None)
-    for sym in universe:
-        try:
-            bars = repo.fetch_ohlcv(sym.symbol, timeframe, limit=200)
-        except NotImplementedError as exc:
-            log.warning("OHLCV fetch not implemented yet for %s: %s", sym.symbol, exc)
-            continue
+    # Pick the first timeframe from data_repository.timeframes as the working TF
+    timeframe = cfg["data_repository"].get("timeframes", ["1d"])[0]
 
-        log.info("Fetched %d bars for %s", len(bars), sym.symbol)
+    # Respect max_symbols (ranking.max_symbols wins, then data_repository.max_symbols)
+    max_symbols = (
+        cfg.get("ranking", {}).get("max_symbols")
+        or cfg["data_repository"].get("max_symbols")
+    )
+    if max_symbols:
+        universe = universe[: max_symbols]
 
-    # Market health placeholder
+    symbols = [u.symbol for u in universe]
+
+    # 🔗 Call your pipeline
+    bundles = compile_score_bundles_for_universe(
+        repo=repo,
+        symbols=symbols,
+        timeframe=timeframe,
+        # universe_returns=...,          # plug in later if/when you have it
+        # derivatives_by_symbol=...,     # plug in later for futures/positioning
+        # weights={"trend_score": 1.0},  # plug in from config if you add weights
+    )
+
+    # Example: sort bundles by confluence score (highest first)
+    bundles.sort(key=lambda b: b.confluence_score, reverse=True)
+
+    for b in bundles:
+        logging.info(
+            "Score %s %s -> confluence=%.2f scores=%s",
+            b.symbol,
+            b.timeframe,
+            b.confluence_score,
+            b.scores,
+        )
+
+    # Keep using repo for market health (or any other high-level metrics)
     health = repo.compute_market_health(universe)
-    log.info("Market regime (stub): %s", health.regime)
+    logging.info("Market regime (stub): %s", health.regime)
+
+
 
 
 def main() -> None:

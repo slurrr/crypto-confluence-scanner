@@ -25,7 +25,8 @@ def compute_basic_features(cfg: Dict[str, Any]) -> None:
         return
 
     symbol = universe[0].symbol
-    timeframe = cfg.get("timeframes", ["1d"])[0]
+    timeframes = cfg["data_repository"].get("timeframes", ["1d"])
+    max_symbols = cfg["data_repository"].get("max_symbols", None)
 
     logging.info("Fetching bars for %s (%s)...", symbol, timeframe)
     bars = repo.fetch_ohlcv(symbol, timeframe, limit=200)
