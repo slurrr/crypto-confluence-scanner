@@ -1,20 +1,14 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Dict, List
-
 from ..data.models import Bar
-from ..features.trend import (
-    compute_ma_alignment,
-    compute_trend_persistence,
-    compute_distance_from_ma,
-    compute_ma_slope_percent,
-)
-
+from ..features.trend import compute_trend_features
+from collections.abc import Mapping
 
 @dataclass
 class TrendScoreResult:
     score: float
+    # Includes raw + component scores used for debugging / reports
     features: Dict[str, float]
 
 
@@ -74,33 +68,38 @@ def _ma_slope_score(slope_pct: float, max_abs: float = 5.0) -> float:
     return normalized * 100.0
 
 
-def compute_trend_score(bars: List[Bar]) -> TrendScoreResult:
+def compute_trend_score(features: Dict[str, float]) -> TrendScoreResult:
     """
-    Compute a first-pass Trend Score from basic MA-based features.
+    Core Trend scoring API.
 
-    This is intentionally simple and will be refined later using your
-    more detailed scoring research. For now:
+    Input:
+        features:
+            dict from `compute_trend_features(...)`, expected keys:
+              - trend_ma_alignment
+              - trend_persistence
+              - trend_distance_from_ma_pct
+              - trend_ma_slope_pct
 
-        trend_score = weighted sum of:
-            - MA alignment
-            - trend persistence
-            - distance from MA
-            - MA slope
-
-    Returns:
+    Output:
         TrendScoreResult with:
-            - score: 0..100
-            - features: dict of raw + component scores
+          - score: 0..100
+          - features: dict of raw + component scores
     """
-    if len(bars) < 60:
-        # Not enough history for robust signals; neutral.
+    #Debugging Legacy callers
+    if not isinstance(features, Mapping):
+        raise TypeError(
+            f"compute_trend_score expected FeatureDict, got {type(features)}. "
+            "Did you mean to call compute_trend_score_from_bars(bars)?"
+        )
+    
+    # If features are missing (e.g., not enough bars), return neutral.
+    if not features:
         return TrendScoreResult(score=50.0, features={})
 
-    # --- Raw features ---
-    ma_align = compute_ma_alignment(bars, short_period=20, long_period=50)
-    persistence = compute_trend_persistence(bars, lookback=20)
-    dist_pct = compute_distance_from_ma(bars, ma_period=50)
-    slope_pct = compute_ma_slope_percent(bars, ma_period=50, lookback=5)
+    ma_align = features["trend_ma_alignment"]
+    persistence = features["trend_persistence"]
+    dist_pct = features["trend_distance_from_ma_pct"]
+    slope_pct = features["trend_ma_slope_pct"]
 
     # --- Component scores ---
     s_align = _ma_alignment_score(ma_align)
@@ -121,15 +120,31 @@ def compute_trend_score(bars: List[Bar]) -> TrendScoreResult:
         + w_slope * s_slope
     )
 
-    features = {
-        "ma_align_raw": ma_align,
-        "ma_align_score": s_align,
-        "trend_persistence_raw": persistence,
+    debug_features: Dict[str, float] = {
+        # raw inputs
+        "trend_ma_alignment": ma_align,
+        "trend_persistence": persistence,
+        "trend_distance_from_ma_pct": dist_pct,
+        "trend_ma_slope_pct": slope_pct,
+        # component scores
+        "trend_ma_alignment_score": s_align,
         "trend_persistence_score": s_persist,
-        "distance_from_ma_pct_raw": dist_pct,
-        "distance_from_ma_score": s_dist,
-        "ma_slope_pct_raw": slope_pct,
-        "ma_slope_score": s_slope,
+        "trend_distance_from_ma_score": s_dist,
+        "trend_ma_slope_score": s_slope,
     }
 
-    return TrendScoreResult(score=_clamp(score), features=features)
+    return TrendScoreResult(score=_clamp(score), features=debug_features)
+
+
+def compute_trend_score_from_bars(bars: List[Bar]) -> TrendScoreResult:
+    """
+    Convenience wrapper for legacy callers.
+
+    Canonical flow in the spec is:
+        bars -> features.trend.compute_trend_features -> scoring.trend_score.compute_trend_score
+
+    This helper keeps the old "just give me bars" calling style alive:
+        bars -> compute_trend_score_from_bars
+    """
+    trend_features = compute_trend_features(bars)
+    return compute_trend_score(trend_features)

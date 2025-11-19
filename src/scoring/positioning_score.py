@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
-from ..data.models import DerivativesMetrics
+from ..data.models import Bar, DerivativesMetrics
+from ..features.positioning import compute_positioning_features
+
+FeatureDict = Dict[str, float]
 
 
 @dataclass
@@ -65,32 +69,27 @@ def _oi_build_up_score(oi_change: float) -> float:
     return _clamp(normalized * 100.0)
 
 
-def compute_positioning_score(deriv: DerivativesMetrics) -> PositioningScoreResult:
+def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
     """
-    First-pass Positioning / Funding / OI score.
+    Core Positioning scoring API.
 
-    If we have no derivatives data at all, return a neutral 50 with
-    empty features so the rest of the system can gracefully ignore it.
+    Input:
+        features:
+            dict from `compute_positioning_features(...)`, expected keys:
+              - positioning_funding_rate
+              - positioning_oi_change_pct
+              - positioning_has_derivatives_data
 
-    Otherwise we blend:
-      - funding_crowding_score (prefer balanced/uncrowded)
-      - oi_build_up_score (prefer measured build-up over exits)
+    Output:
+        PositioningScoreResult with:
+          - score: 0..100
+          - features: dict of raw + component scores
     """
-    has_any = any(
-        v is not None
-        for v in (
-            deriv.funding_rate,
-            deriv.open_interest,
-            deriv.funding_z,
-            deriv.oi_change,
-        )
-    )
-
-    if not has_any:
+    if not isinstance(features, Mapping) or not features:
         return PositioningScoreResult(score=50.0, features={})
 
-    funding_rate = deriv.funding_rate or 0.0
-    oi_change = deriv.oi_change or 0.0
+    funding_rate = features.get("positioning_funding_rate", 0.0)
+    oi_change = features.get("positioning_oi_change_pct", 0.0)
 
     s_funding = _funding_crowding_score(funding_rate)
     s_oi = _oi_build_up_score(oi_change)
@@ -101,11 +100,40 @@ def compute_positioning_score(deriv: DerivativesMetrics) -> PositioningScoreResu
 
     score = w_funding * s_funding + w_oi * s_oi
 
-    features: Dict[str, float] = {
-        "funding_rate_raw": funding_rate,
-        "funding_crowding_score": s_funding,
-        "oi_change_raw": oi_change,
-        "oi_build_up_score": s_oi,
+    debug_features: Dict[str, float] = {
+        # raw inputs
+        "positioning_funding_rate": funding_rate,
+        "positioning_oi_change_pct": oi_change,
+        # component scores
+        "positioning_funding_crowding_score": s_funding,
+        "positioning_oi_build_up_score": s_oi,
     }
 
-    return PositioningScoreResult(score=_clamp(score), features=features)
+    return PositioningScoreResult(score=_clamp(score), features=debug_features)
+
+
+def compute_positioning_score_from_bars_and_derivatives(
+    bars: Sequence[Bar],
+    derivatives: DerivativesMetrics | None,
+) -> PositioningScoreResult:
+    """
+    Convenience wrapper for legacy / simpler callers.
+
+    Canonical flow in the spec is:
+        (bars, derivatives)
+          -> features.positioning.compute_positioning_features
+          -> scoring.positioning_score.compute_positioning_score
+    """
+    pos_features = compute_positioning_features(bars, derivatives)
+    return compute_positioning_score(pos_features)
+
+
+def compute_positioning_score_from_derivatives(
+    derivatives: DerivativesMetrics | None,
+) -> PositioningScoreResult:
+    """
+    Extra convenience wrapper if callers don't care about bars at all yet.
+    """
+    # empty tuple for bars; positioning features v1 ignore bars anyway
+    pos_features = compute_positioning_features((), derivatives)
+    return compute_positioning_score(pos_features)

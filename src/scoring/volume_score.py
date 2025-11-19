@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict
 
 from ..data.models import Bar
-from ..features.volume import (
-    compute_rvol,
-    compute_volume_trend_slope,
-    compute_volume_percentile,
-)
+from ..features.volume import compute_volume_features
+
+FeatureDict = Dict[str, float]
 
 
 @dataclass
@@ -21,7 +20,11 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 
 
-def _rvol_score(rvol: float, ideal_low: float = 1.5, ideal_high: float = 3.0) -> float:
+def _rvol_score(
+    rvol: float,
+    ideal_low: float = 1.5,
+    ideal_high: float = 3.0,
+) -> float:
     """
     Score RVOL for breakout-type setups.
 
@@ -72,23 +75,29 @@ def _volume_percentile_score(pct: float) -> float:
     return _clamp(pct * 100.0)
 
 
-def compute_volume_score(bars: List[Bar]) -> VolumeScoreResult:
+def compute_volume_score(features: FeatureDict) -> VolumeScoreResult:
     """
-    Compute a first-pass Volume Score from:
+    Core Volume scoring API.
 
-        - RVOL (recent vs base)
-        - Volume trend slope
-        - Volume percentile
+    Input:
+        features:
+            dict from `compute_volume_features(...)`, expected keys:
+              - volume_rvol_20_1
+              - volume_trend_slope_pct_20_10
+              - volume_percentile_60
 
-    This is breakout-biased: more volume and increasing volume get rewarded.
+    Output:
+        VolumeScoreResult with:
+          - score: 0..100
+          - features: dict of raw + component scores
     """
-    if len(bars) < 40:
-        # Not enough data for reliable stats; neutral-ish.
+    if not isinstance(features, Mapping) or not features:
+        # Not enough data -> neutral-ish
         return VolumeScoreResult(score=50.0, features={})
 
-    rvol = compute_rvol(bars, lookback=20, recent_window=1)
-    slope_pct = compute_volume_trend_slope(bars, ma_period=20, lookback=10)
-    vol_pct = compute_volume_percentile(bars, lookback=60)
+    rvol = features["volume_rvol_20_1"]
+    slope_pct = features["volume_trend_slope_pct_20_10"]
+    vol_pct = features["volume_percentile_60"]
 
     s_rvol = _rvol_score(rvol, ideal_low=1.5, ideal_high=3.0)
     s_slope = _volume_trend_score(slope_pct, max_abs=20.0)
@@ -101,13 +110,32 @@ def compute_volume_score(bars: List[Bar]) -> VolumeScoreResult:
 
     score = w_rvol * s_rvol + w_slope * s_slope + w_pct * s_pct
 
-    features = {
-        "rvol_raw": rvol,
-        "rvol_score": s_rvol,
-        "volume_trend_slope_pct_raw": slope_pct,
+    debug_features: Dict[str, float] = {
+        # raw
+        "volume_rvol_20_1": rvol,
+        "volume_trend_slope_pct_20_10": slope_pct,
+        "volume_percentile_60": vol_pct,
+        # component scores
+        "volume_rvol_score": s_rvol,
         "volume_trend_slope_score": s_slope,
-        "volume_percentile_raw": vol_pct,
         "volume_percentile_score": s_pct,
     }
 
-    return VolumeScoreResult(score=_clamp(score), features=features)
+    return VolumeScoreResult(score=_clamp(score), features=debug_features)
+
+
+def compute_volume_score_from_bars(
+    bars: Sequence[Bar],
+) -> VolumeScoreResult:
+    """
+    Convenience wrapper for legacy callers.
+
+    Canonical flow:
+        bars -> features.volume.compute_volume_features
+             -> scoring.volume_score.compute_volume_score
+
+    This helper keeps the older "just give me bars" calling style alive:
+        bars -> compute_volume_score_from_bars
+    """
+    vol_features = compute_volume_features(bars)
+    return compute_volume_score(vol_features)

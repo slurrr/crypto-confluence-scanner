@@ -1,5 +1,7 @@
-timeframes:
-  - 1d
+data_repository:
+  timeframes: ["1d", "4h"]
+  max_symbols: 100
+
 
 exchange:
   id: binance
@@ -11,6 +13,7 @@ exchange:
 
   derivatives:
     id: binanceusdm     # CCXT id for Binance USDT-M futures
+    
 
 ranking:
   max_symbols: 20   # cap how many symbols you scan per run

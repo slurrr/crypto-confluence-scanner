@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
-
+from typing import Dict, List, Optional, Sequence
 from .exchange_api import ExchangeAPI
 from .models import Bar, SymbolMeta, DerivativesMetrics, MarketHealth
 
-from ..scoring.trend_score import compute_trend_score
-from ..scoring.volatility_score import compute_volatility_score
-from ..scoring.positioning_score import compute_positioning_score
+from ..scoring.trend_score import compute_trend_score, compute_trend_score_from_bars
+from ..scoring.volatility_score import compute_volatility_score, compute_volatility_score_from_bars
+from ..scoring.positioning_score import compute_positioning_score, compute_positioning_score_from_bars_and_derivatives, compute_positioning_score_from_derivatives
 
 import logging
 
@@ -19,7 +18,8 @@ log = logging.getLogger(__name__)
 class DataRepositoryConfig:
     """Lightweight config for the repository."""
     timeframes: Sequence[str]
-
+    max_symbols: Optional[int] = None    # limit for universe discovery
+    
 
 class DataRepository:
     """
@@ -33,7 +33,6 @@ class DataRepository:
         self.api = api
         self.cfg = cfg
         self._universe_cache: list[SymbolMeta] | None = None
-    
 
     # --- Universe discovery ---
 
@@ -46,6 +45,11 @@ class DataRepository:
             return self._universe_cache
 
         symbols = self.api.list_symbols()
+        # Get max_symbols from config (optional)
+        max_syms = self.cfg.max_symbols
+        # Apply limit if configured
+        if max_syms is not None:
+            symbols = symbols[:max_syms]
         self._universe_cache = list(symbols)
         log.info("Discovered %d symbols in universe", len(self._universe_cache))
         return self._universe_cache
@@ -107,8 +111,8 @@ class DataRepository:
             bench_bars = []
 
         if bench_bars:
-            bench_trend = compute_trend_score(bench_bars)
-            bench_vol = compute_volatility_score(bench_bars)
+            bench_trend = compute_trend_score_from_bars(bench_bars)
+            bench_vol = compute_volatility_score_from_bars(bench_bars)
             btc_trend_score = bench_trend.score
             btc_vol_score = bench_vol.score
         else:
@@ -132,7 +136,7 @@ class DataRepository:
             if not bars:
                 continue
 
-            t_res = compute_trend_score(bars)
+            t_res = compute_trend_score_from_bars(bars)
             trend_valid += 1
             if t_res.score >= 60.0:
                 uptrend_count += 1
@@ -140,7 +144,7 @@ class DataRepository:
             # Positioning per symbol (funding + OI change)
             try:
                 deriv = self.fetch_derivatives(symbol)
-                pos_res = compute_positioning_score(deriv)
+                pos_res = compute_positioning_score_from_bars_and_derivatives(bars, deriv)
                 positioning_scores.append(pos_res.score)
             except Exception:
                 # Not all symbols have derivatives; that's fine.

@@ -5,18 +5,19 @@ from typing import Any, Dict, List, Sequence
 
 from ..data.models import Bar, SymbolMeta, DerivativesMetrics
 from ..data.repository import DataRepository
-from ..scoring.trend_score import compute_trend_score, TrendScoreResult
+from ..scoring.trend_score import compute_trend_score, TrendScoreResult, compute_trend_score_from_bars
 from ..scoring.volatility_score import (
     compute_volatility_score,
+    compute_volatility_score_from_bars,
     VolatilityScoreResult,
 )
-from ..scoring.volume_score import compute_volume_score, VolumeScoreResult
+from ..scoring.volume_score import compute_volume_score, compute_volume_score_from_bars, VolumeScoreResult
 from ..scoring.rs_score import (
     compute_relative_strength_score,
     RelativeStrengthScoreResult,
 )
 from ..scoring.positioning_score import (
-    compute_positioning_score,
+    compute_positioning_score_from_bars_and_derivatives,
     PositioningScoreResult,
 )
 from ..scoring.confluence import (
@@ -62,9 +63,9 @@ def score_symbol(
         return None
 
     # Trend / Vol / Volume / RS from OHLCV
-    trend = compute_trend_score(bars)
-    vol = compute_volatility_score(bars)
-    volu = compute_volume_score(bars)
+    trend = compute_trend_score_from_bars(bars)
+    vol = compute_volatility_score_from_bars(bars)
+    volu = compute_volume_score_from_bars(bars)
     rs = compute_relative_strength_score(bars)
 
     # Positioning / funding / OI from derivatives stream
@@ -73,7 +74,7 @@ def score_symbol(
     except Exception as exc:
         print(f"[WARN] Failed to fetch derivatives for {symbol_meta.symbol}: {exc}")
         deriv = DerivativesMetrics(symbol=symbol_meta.symbol)
-    positioning = compute_positioning_score(deriv)
+    positioning = compute_positioning_score_from_bars_and_derivatives(bars, deriv)
 
     conf = compute_confluence_score(
         symbol=symbol_meta.symbol,

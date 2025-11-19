@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import List
+from collections.abc import Sequence
+from typing import Dict, List
 
 from ..data.models import Bar
+
+FeatureDict = Dict[str, float]
 
 
 def _true_range(prev_close: float, high: float, low: float) -> float:
@@ -66,7 +69,11 @@ def compute_atr_percent(bars: List[Bar], period: int = 14) -> float:
     return atr_val / last_close * 100.0
 
 
-def compute_bb_width_percent(bars: List[Bar], period: int = 20, std_dev: float = 2.0) -> float:
+def compute_bb_width_percent(
+    bars: List[Bar],
+    period: int = 20,
+    std_dev: float = 2.0,
+) -> float:
     """
     Bollinger Band width (upper - lower) as a percentage of the middle band.
 
@@ -122,10 +129,46 @@ def compute_volatility_contraction_ratio(
     earlier_segment = bars[-(window_long + window_short) : -window_short]
     recent_segment = bars[-(window_short + 1) :]
 
-    earlier_atr_pct = compute_atr_percent(earlier_segment, period=min(14, len(earlier_segment) - 1))
-    recent_atr_pct = compute_atr_percent(recent_segment, period=min(14, len(recent_segment) - 1))
+    earlier_atr_pct = compute_atr_percent(
+        earlier_segment, period=min(14, len(earlier_segment) - 1)
+    )
+    recent_atr_pct = compute_atr_percent(
+        recent_segment, period=min(14, len(recent_segment) - 1)
+    )
 
     if earlier_atr_pct <= 0:
         return 1.0
 
     return recent_atr_pct / earlier_atr_pct
+
+
+def compute_volatility_features(bars: Sequence[Bar]) -> FeatureDict:
+    """
+    Canonical Volatility feature API.
+
+    Input:
+        - bars: OHLCV history for a single symbol/timeframe (oldest -> newest)
+
+    Output:
+        - dict of raw volatility features with stable snake_case keys.
+
+    Keys (stable schema):
+        - volatility_atr_pct_14
+        - volatility_bb_width_pct_20
+        - volatility_contraction_ratio_60_20
+    """
+    # Mirror the scoring requirement: need enough history for ATR + contraction.
+    if len(bars) < 80:
+        return {}
+
+    atr_pct_14 = compute_atr_percent(list(bars), period=14)
+    bb_width_pct_20 = compute_bb_width_percent(list(bars), period=20, std_dev=2.0)
+    contraction_ratio_60_20 = compute_volatility_contraction_ratio(
+        list(bars), window_long=60, window_short=20
+    )
+
+    return {
+        "volatility_atr_pct_14": atr_pct_14,
+        "volatility_bb_width_pct_20": bb_width_pct_20,
+        "volatility_contraction_ratio_60_20": contraction_ratio_60_20,
+    }

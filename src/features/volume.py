@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import List
+from collections.abc import Sequence
+from typing import Dict, List
 
 from ..data.models import Bar
+
+FeatureDict = Dict[str, float]
 
 
 def _volumes(bars: List[Bar]) -> List[float]:
@@ -98,3 +101,35 @@ def compute_volume_percentile(
     below_or_equal = sum(1 for v in window if v <= last)
     total = len(window)
     return below_or_equal / total if total > 0 else 0.5
+
+
+def compute_volume_features(bars: Sequence[Bar]) -> FeatureDict:
+    """
+    Canonical Volume feature API.
+
+    Input:
+        - bars: OHLCV history for a single symbol/timeframe (oldest -> newest)
+
+    Output:
+        - dict of raw volume features with stable snake_case keys.
+
+    Keys (stable schema):
+        - volume_rvol_20_1
+        - volume_trend_slope_pct_20_10
+        - volume_percentile_60
+    """
+    # Match the earlier scoring behavior: require some history, or return neutral.
+    if len(bars) < 40:
+        return {}
+
+    bars_list = list(bars)
+
+    rvol = compute_rvol(bars_list, lookback=20, recent_window=1)
+    slope_pct = compute_volume_trend_slope(bars_list, ma_period=20, lookback=10)
+    vol_pct = compute_volume_percentile(bars_list, lookback=60)
+
+    return {
+        "volume_rvol_20_1": rvol,
+        "volume_trend_slope_pct_20_10": slope_pct,
+        "volume_percentile_60": vol_pct,
+    }

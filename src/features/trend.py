@@ -1,8 +1,8 @@
 from __future__ import annotations
-
-from typing import List
-
+from typing import Dict, List
 from ..data.models import Bar
+from collections.abc import Mapping
+FeatureDict = Dict[str, float]
 
 
 def _take_last(values: List[float], n: int) -> List[float]:
@@ -92,7 +92,11 @@ def compute_distance_from_ma(bars: List[Bar], ma_period: int = 50) -> float:
     return (last_close - ma) / ma * 100.0
 
 
-def compute_ma_slope_percent(bars: List[Bar], ma_period: int = 50, lookback: int = 5) -> float:
+def compute_ma_slope_percent(
+    bars: List[Bar],
+    ma_period: int = 50,
+    lookback: int = 5,
+) -> float:
     """
     Slope of a moving average over the last `lookback` bars, as a percentage.
 
@@ -117,3 +121,37 @@ def compute_ma_slope_percent(bars: List[Bar], ma_period: int = 50, lookback: int
         return 0.0
 
     return (ma_end - ma_start) / ma_start * 100.0
+
+
+def compute_trend_features(bars: List[Bar]) -> FeatureDict:
+    """
+    Canonical Trend feature API.
+
+    Input:
+        - bars: OHLCV history for a single symbol/timeframe (oldest -> newest)
+
+    Output:
+        - dict of raw trend features with stable snake_case keys.
+
+    Keys (stable schema):
+        - trend_ma_alignment        : float in {-1.0, 0.0, +1.0}
+        - trend_persistence         : float in [0.0, 1.0]
+        - trend_distance_from_ma_pct: float, signed % from MA
+        - trend_ma_slope_pct        : float, approx % change of MA over lookback
+    """
+    # If we truly don't have enough data for this block to mean anything,
+    # return an empty dict and let the caller / scoring handle it gracefully.
+    if len(bars) < 60:
+        return {}
+
+    ma_align = compute_ma_alignment(bars, short_period=20, long_period=50)
+    persistence = compute_trend_persistence(bars, lookback=20)
+    dist_pct = compute_distance_from_ma(bars, ma_period=50)
+    slope_pct = compute_ma_slope_percent(bars, ma_period=50, lookback=5)
+
+    return {
+        "trend_ma_alignment": ma_align,
+        "trend_persistence": persistence,
+        "trend_distance_from_ma_pct": dist_pct,
+        "trend_ma_slope_pct": slope_pct,
+    }

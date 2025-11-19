@@ -46,8 +46,12 @@ def load_config(path: str | Path) -> Dict[str, Any]:
 
 
 def build_repository(cfg: Dict[str, Any]) -> DataRepository:
-    timeframes: Sequence[str] = cfg.get("timeframes", ["1d"])
-    repo_cfg = DataRepositoryConfig(timeframes=timeframes)
+    timeframes = cfg["data_repository"].get("timeframes", ["1d"])
+    max_symbols = cfg["data_repository"].get("max_symbols", None)
+    repo_cfg = DataRepositoryConfig(
+        timeframes=timeframes,
+        max_symbols=max_symbols,
+    )
 
     exchange_cfg = cfg.get("exchange", {})
     exchange_id = exchange_cfg.get("id", "binance")
@@ -73,8 +77,8 @@ def run_scan(config_path: str = "config.yaml") -> None:
     log.info("Universe size: %d symbols", len(universe))
 
     # Pick first timeframe for now
-    timeframe = cfg.get("timeframes", ["1d"])[0]
-
+    timeframe = cfg.get["data_repository"]("timeframes", ["1d"])[0]
+    max_symbols = cfg["data_repository"].get("max_symbols", None)
     for sym in universe:
         try:
             bars = repo.fetch_ohlcv(sym.symbol, timeframe, limit=200)

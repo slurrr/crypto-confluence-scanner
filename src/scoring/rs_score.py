@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict
 
 from ..data.models import Bar
-from ..features.relative_strength import compute_multi_horizon_returns
+from ..features.relative_strength import compute_rs_features
+
+FeatureDict = Dict[str, float]
 
 
 @dataclass
@@ -42,33 +45,31 @@ def _return_score(
     return _clamp(normalized * 100.0)
 
 
-def compute_relative_strength_score(bars: List[Bar]) -> RelativeStrengthScoreResult:
+def compute_relative_strength_score(
+    features: FeatureDict,
+) -> RelativeStrengthScoreResult:
     """
-    First-pass Relative Strength score based on multi-horizon returns.
+    Core Relative Strength scoring API.
 
-    Assumes 1 bar ~ 1 day if you're using 1D timeframe:
-        - 20 bars  ~ 1 month
-        - 60 bars  ~ ~3 months
-        - 120 bars ~ ~6 months
+    Input:
+        features:
+            dict from `compute_rs_features(...)`, expected keys:
+              - rs_ret_20_pct
+              - rs_ret_60_pct
+              - rs_ret_120_pct
 
-    We blend:
-        - 1M return
-        - 3M return
-        - 6M return
-
-    Longer horizons get slightly more weight, but you can tune later.
+    Output:
+        RelativeStrengthScoreResult with:
+          - score: 0..100
+          - features: dict of raw + component scores
     """
-    # Need enough history to at least compute 3M (60 bars). We'll still
-    # compute a degraded score if we have less than 120 bars.
-    if len(bars) < 40:
+    if not isinstance(features, Mapping) or not features:
         # Too little data; neutral-ish, empty features.
         return RelativeStrengthScoreResult(score=50.0, features={})
 
-    rets = compute_multi_horizon_returns(bars, horizons=[20, 60, 120])
-
-    ret_20 = rets.get("ret_20", 0.0)
-    ret_60 = rets.get("ret_60", 0.0)
-    ret_120 = rets.get("ret_120", 0.0)
+    ret_20 = features["rs_ret_20_pct"]
+    ret_60 = features["rs_ret_60_pct"]
+    ret_120 = features["rs_ret_120_pct"]
 
     s_20 = _return_score(ret_20)
     s_60 = _return_score(ret_60)
@@ -80,18 +81,34 @@ def compute_relative_strength_score(bars: List[Bar]) -> RelativeStrengthScoreRes
     w_60 = 0.35
     w_120 = 0.40
 
-    # If we don't have enough bars for 120-bar lookback, its return will
-    # be 0 and score mid-ish. You can later make this smarter by tracking
-    # which horizons are "valid".
     score = w_20 * s_20 + w_60 * s_60 + w_120 * s_120
 
-    features: Dict[str, float] = {
-        "ret_20_raw": ret_20,
-        "ret_20_score": s_20,
-        "ret_60_raw": ret_60,
-        "ret_60_score": s_60,
-        "ret_120_raw": ret_120,
-        "ret_120_score": s_120,
+    debug_features: Dict[str, float] = {
+        # raw returns
+        "rs_ret_20_pct": ret_20,
+        "rs_ret_60_pct": ret_60,
+        "rs_ret_120_pct": ret_120,
+        # component scores
+        "rs_ret_20_score": s_20,
+        "rs_ret_60_score": s_60,
+        "rs_ret_120_score": s_120,
     }
 
-    return RelativeStrengthScoreResult(score=_clamp(score), features=features)
+    return RelativeStrengthScoreResult(score=_clamp(score), features=debug_features)
+
+
+def compute_relative_strength_score_from_bars(
+    bars: Sequence[Bar],
+) -> RelativeStrengthScoreResult:
+    """
+    Convenience wrapper for legacy callers.
+
+    Canonical flow in the spec is:
+        bars -> features.relative_strength.compute_rs_features
+             -> scoring.rs_score.compute_relative_strength_score
+
+    This helper keeps the older "just give me bars" calling style alive:
+        bars -> compute_relative_strength_score_from_bars
+    """
+    rs_features = compute_rs_features(bars, universe_returns=None)
+    return compute_relative_strength_score(rs_features)

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict
 
 from ..data.models import Bar
-from ..features.volatility import (
-    compute_atr_percent,
-    compute_bb_width_percent,
-    compute_volatility_contraction_ratio,
-)
+from ..features.volatility import compute_volatility_features
+
+FeatureDict = Dict[str, float]
 
 
 @dataclass
@@ -59,26 +58,29 @@ def _contraction_ratio_score(ratio: float) -> float:
     return _clamp(normalized * 100.0)
 
 
-def compute_volatility_score(bars: List[Bar]) -> VolatilityScoreResult:
+def compute_volatility_score(features: FeatureDict) -> VolatilityScoreResult:
     """
-    Compute a first-pass Volatility Score.
+    Core Volatility scoring API.
 
-    Idea:
-        - Favor lower ATR% (quieter markets vs price)
-        - Favor narrower Bollinger Band width% (compression)
-        - Favor contraction ratio <= 1 (recent vol < past vol)
+    Input:
+        features:
+            dict from `compute_volatility_features(...)`, expected keys:
+              - volatility_atr_pct_14
+              - volatility_bb_width_pct_20
+              - volatility_contraction_ratio_60_20
 
-    This is "breakout setup"-biased scoring and can be tuned later.
+    Output:
+        VolatilityScoreResult with:
+          - score: 0..100
+          - features: dict of raw + component scores
     """
-    if len(bars) < 80:
-        # Not enough history for contraction calcs; neutral-ish.
+    if not isinstance(features, Mapping) or not features:
+        # Not enough data -> neutral-ish
         return VolatilityScoreResult(score=50.0, features={})
 
-    atr_pct = compute_atr_percent(bars, period=14)
-    bb_width_pct = compute_bb_width_percent(bars, period=20, std_dev=2.0)
-    contraction_ratio = compute_volatility_contraction_ratio(
-        bars, window_long=60, window_short=20
-    )
+    atr_pct = features["volatility_atr_pct_14"]
+    bb_width_pct = features["volatility_bb_width_pct_20"]
+    contraction_ratio = features["volatility_contraction_ratio_60_20"]
 
     s_atr = _inverse_scale_score(atr_pct, scale=5.0)
     s_bb = _inverse_scale_score(bb_width_pct, scale=10.0)
@@ -91,13 +93,32 @@ def compute_volatility_score(bars: List[Bar]) -> VolatilityScoreResult:
 
     score = w_atr * s_atr + w_bb * s_bb + w_contr * s_contr
 
-    features = {
-        "atr_pct_raw": atr_pct,
-        "atr_score": s_atr,
-        "bb_width_pct_raw": bb_width_pct,
-        "bb_width_score": s_bb,
-        "vol_contraction_ratio_raw": contraction_ratio,
-        "vol_contraction_ratio_score": s_contr,
+    debug_features: Dict[str, float] = {
+        # raw
+        "volatility_atr_pct_14": atr_pct,
+        "volatility_bb_width_pct_20": bb_width_pct,
+        "volatility_contraction_ratio_60_20": contraction_ratio,
+        # component scores
+        "volatility_atr_score": s_atr,
+        "volatility_bb_width_score": s_bb,
+        "volatility_contraction_ratio_score": s_contr,
     }
 
-    return VolatilityScoreResult(score=_clamp(score), features=features)
+    return VolatilityScoreResult(score=_clamp(score), features=debug_features)
+
+
+def compute_volatility_score_from_bars(
+    bars: Sequence[Bar],
+) -> VolatilityScoreResult:
+    """
+    Convenience wrapper for legacy callers.
+
+    Canonical flow in the spec is:
+        bars -> features.volatility.compute_volatility_features
+             -> scoring.volatility_score.compute_volatility_score
+
+    This helper keeps the older "just give me bars" style alive:
+        bars -> compute_volatility_score_from_bars
+    """
+    vol_features = compute_volatility_features(bars)
+    return compute_volatility_score(vol_features)

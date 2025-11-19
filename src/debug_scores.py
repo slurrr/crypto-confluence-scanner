@@ -4,10 +4,10 @@ import logging
 from typing import Any, Dict
 
 from .main import load_config, build_repository
-from .scoring.trend_score import compute_trend_score
-from .scoring.volatility_score import compute_volatility_score
-from .scoring.volume_score import compute_volume_score
-from .scoring.rs_score import compute_relative_strength_score
+from .scoring.trend_score import compute_trend_score, compute_trend_score_from_bars
+from .scoring.volatility_score import compute_volatility_score, compute_volatility_score_from_bars
+from .scoring.volume_score import compute_volume_score, compute_volume_score_from_bars
+from .scoring.rs_score import compute_relative_strength_score, compute_relative_strength_score_from_bars
 
 
 def compute_scores_for_first_symbol(cfg: Dict[str, Any]) -> None:
@@ -27,10 +27,10 @@ def compute_scores_for_first_symbol(cfg: Dict[str, Any]) -> None:
         logging.error("No bars returned for %s", symbol)
         return
 
-    trend = compute_trend_score(bars)
-    vol = compute_volatility_score(bars)
-    volu = compute_volume_score(bars)
-    rs = compute_relative_strength_score(bars)
+    trend = compute_trend_score_from_bars(bars)
+    vol = compute_volatility_score_from_bars(bars)
+    volu = compute_volume_score_from_bars(bars)
+    rs = compute_relative_strength_score_from_bars(bars)
 
     logging.info("Trend score for %s: %.2f", symbol, trend.score)
     logging.info("Trend features: %s", trend.features)

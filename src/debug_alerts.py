@@ -25,8 +25,9 @@ def main() -> None:
     exchange_id = cfg.get("exchange", {}).get("id", "binance")
     api = CcxtExchangeAPI(exchange_id)
 
-    timeframes = cfg.get("timeframes", ["1d"])
-    repo_cfg = DataRepositoryConfig(timeframes=timeframes)
+    timeframes = cfg["data_repository"].get("timeframes", ["1d"])
+    max_symbols = cfg["data_repository"].get("max_symbols", None)
+    repo_cfg = DataRepositoryConfig(timeframes=timeframes, max_symbols=max_symbols)
 
     repo = DataRepository(api=api, cfg=repo_cfg)
 
