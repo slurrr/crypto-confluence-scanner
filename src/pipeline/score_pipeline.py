@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from data.models import ScoreBundle
-from data.repository import DataRepository
+from ..data.models import ScoreBundle
+from ..data.repository import DataRepository
 
-from features.trend import compute_trend_features
-from features.volume import compute_volume_features
-from features.volatility import compute_volatility_features
-from features.relative_strength import compute_rs_features
-from features.positioning import compute_positioning_features
+from ..features.trend import compute_trend_features
+from ..features.volume import compute_volume_features
+from ..features.volatility import compute_volatility_features
+from ..features.relative_strength import compute_rs_features
+from ..features.positioning import compute_positioning_features
 
-# Adjust imports to your actual score module names / APIs
-from scoring.trend_score import compute_trend_score
-from scoring.volume_score import compute_volume_score
-from scoring.volatility_score import compute_volatility_score
-from scoring.rs_score import compute_relative_strength_score
-from scoring.positioning_score import compute_positioning_score
-from scoring.confluence import compute_confluence_score
-
+from ..scoring.trend_score import compute_trend_score
+from ..scoring.volume_score import compute_volume_score
+from ..scoring.volatility_score import compute_volatility_score
+from ..scoring.rs_score import compute_relative_strength_score
+from ..scoring.positioning_score import compute_positioning_score
+from ..scoring.confluence import compute_confluence_score
 
 
 # ---------- Feature assembly ----------
@@ -57,8 +55,8 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
     """
     Run all score modules and merge results into a single dict.
 
-    Each `compute_*_scores` is expected to return a dict, e.g.:
-      {"trend_score": 37.5}
+    If your compute_*_score functions currently return floats,
+    you can wrap them into dicts here.
     """
     s_trend = compute_trend_score(features)
     s_volume = compute_volume_score(features)
@@ -66,12 +64,14 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
     s_rs = compute_relative_strength_score(features)
     s_positioning = compute_positioning_score(features)
 
+    # If the above return floats, wrap them like:
+    # "trend_score": s_trend, etc.
     scores: Dict[str, float] = {
-        **s_trend,
-        **s_volume,
-        **s_volatility,
-        **s_rs,
-        **s_positioning,
+        "trend_score": s_trend,
+        "volume_score": s_volume,
+        "volatility_score": s_volatility,
+        "rs_score": s_rs,
+        "positioning_score": s_positioning,
     }
     return scores
 
@@ -85,6 +85,8 @@ def build_score_bundle_for_bars(
     *,
     universe_returns: Optional[Any] = None,
     derivatives: Optional[Any] = None,
+    cfg: Optional[Mapping[str, Any]] = None,
+    regime: Optional[str] = None,
     weights: Optional[Dict[str, float]] = None,
 ) -> ScoreBundle:
     """
@@ -97,7 +99,14 @@ def build_score_bundle_for_bars(
         derivatives=derivatives,
     )
     scores = compute_all_scores(features)
-    confluence = compute_confluence_score(scores, weights=weights)["confluence_score"]
+
+    #confluence_cfg = cfg.get("confluence", {}) if cfg else {}
+    confluence = compute_confluence_score(
+        scores,
+        weights=weights,  # optional explicit override
+        regime=regime,
+        cfg=cfg,
+    )["confluence_score"]
 
     return ScoreBundle(
         symbol=symbol,
@@ -116,6 +125,8 @@ def build_score_bundle_from_repo(
     *,
     universe_returns: Optional[Any] = None,
     derivatives: Optional[Any] = None,
+    cfg: Optional[Mapping[str, Any]] = None,
+    regime: Optional[str] = None,
     weights: Optional[Dict[str, float]] = None,
 ) -> ScoreBundle:
     """
@@ -129,6 +140,8 @@ def build_score_bundle_from_repo(
         bars=bars,
         universe_returns=universe_returns,
         derivatives=derivatives,
+        cfg=cfg,
+        regime=regime,
         weights=weights,
     )
 
@@ -140,6 +153,8 @@ def compile_score_bundles_for_universe(
     *,
     universe_returns: Optional[Any] = None,
     derivatives_by_symbol: Optional[Dict[str, Any]] = None,
+    cfg: Optional[Mapping[str, Any]] = None,
+    regime: Optional[str] = None,
     weights: Optional[Dict[str, float]] = None,
 ) -> List[ScoreBundle]:
     """
@@ -160,8 +175,11 @@ def compile_score_bundles_for_universe(
             timeframe=timeframe,
             universe_returns=universe_returns,
             derivatives=derivatives,
+            cfg=cfg,
+            regime=regime,
             weights=weights,
         )
         bundles.append(bundle)
 
     return bundles
+

@@ -5,15 +5,15 @@ data_repository:
 
 exchange:
   id: binance
+  derivatives:
+    id: binanceusdm     # CCXT id for Binance USDT-M futures
+
+universe:
   symbols:
     - BTC/USDT
     - ETH/USDT
     - ZEC/USDT
     - LTC/USDT
-
-  derivatives:
-    id: binanceusdm     # CCXT id for Binance USDT-M futures
-    
 
 ranking:
   max_symbols: 20   # cap how many symbols you scan per run
@@ -26,7 +26,38 @@ ranking:
 #  max_atr_pct: 25            # avoid super-crazy ATR%
 #  max_bb_width_pct: 60       # avoid names with massive expansion
 
-  reports:
+confluence:
+  default_regime: sideways
+  regime_weights:
+    bull:
+      trend: 0.30
+      volume: 0.25
+      volatility: 0.10
+      rs: 0.25
+      positioning: 0.10
+    sideways:
+      trend: 0.20
+      volume: 0.25
+      volatility: 0.25
+      rs: 0.20
+      positioning: 0.10
+    bear:
+      trend: 0.25
+      volume: 0.15
+      volatility: 0.20
+      rs: 0.20
+      positioning: 0.20
+
+regimes:
+  bull_min_risk_on: 65
+  bull_min_breadth: 60
+  bull_min_trend: 60
+
+  bear_max_risk_on: 35
+  bear_max_breadth: 40
+  bear_max_trend: 40
+
+reports:
   top_n: 20
   output_dir: reports
 

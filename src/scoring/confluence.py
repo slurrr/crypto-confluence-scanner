@@ -1,63 +1,97 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Mapping, Optional
+
+DEFAULT_REGIME = "sideways"
+
+# If config is totally missing, we’ll fall back to equal weights on these:
+DEFAULT_SCORE_KEYS = [
+    "trend_score",
+    "volume_score",
+    "volatility_score",
+    "rs_score",
+    "positioning_score",
+]
 
 
-@dataclass
-class ComponentScores:
-    trend: float
-    volatility: float
-    volume: float
-    rs: float
-    positioning: float
+def _resolve_regime_weights(
+    *,
+    cfg: Optional[Mapping[str, Any]],
+    regime: Optional[str],
+) -> Dict[str, float]:
+    """
+    Resolve score weights based on regime and config.
+    Priority:
+      1) cfg['confluence']['regime_weights'][regime]
+      2) cfg['confluence']['regime_weights'][default_regime]
+      3) equal weights over DEFAULT_SCORE_KEYS
+    """
+    if cfg is None:
+        return _equal_weights(DEFAULT_SCORE_KEYS)
+
+    conf_cfg = cfg.get("confluence", {})
+    default_regime = str(conf_cfg.get("default_regime", DEFAULT_REGIME)).lower()
+    regime_weights_cfg = conf_cfg.get("regime_weights", {}) or {}
+
+    regime_key = (regime or default_regime).lower()
+
+    # 1) Try requested regime
+    weights = regime_weights_cfg.get(regime_key)
+
+    # 2) Fall back to default_regime in config
+    if weights is None:
+        weights = regime_weights_cfg.get(default_regime)
+
+    # 3) If still nothing, equal weights
+    if not weights:
+        return _equal_weights(DEFAULT_SCORE_KEYS)
+
+    # Normalize to float dict
+    return {str(k): float(v) for k, v in weights.items()}
 
 
-@dataclass
-class ConfluenceScoreResult:
-    symbol: str
-    timeframe: str
-    confluence_score: float
-    components: ComponentScores
-    raw_components: Dict[str, float]
-
-def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
-    return max(lo, min(hi, value))
+def _equal_weights(keys: list[str]) -> Dict[str, float]:
+    if not keys:
+        return {}
+    w = 1.0 / len(keys)
+    return {k: w for k in keys}
 
 
 def compute_confluence_score(
     scores: Dict[str, float],
     *,
     weights: Optional[Dict[str, float]] = None,
-    default_positioning: float = 50.0
+    regime: Optional[str] = None,
+    cfg: Optional[Mapping[str, Any]] = None,
+    default_positioning: float = 50.0,
 ) -> Dict[str, float]:
     """
-    Compute a weighted confluence score from individual component scores.
-    Returns {"confluence_score": float}
+    Compute a confluence score from component scores.
+
+    - If `weights` is provided, it wins.
+    - Else, derive weights from config + regime.
+    - If positioning_score is missing/None, treat it as neutral (default_positioning).
     """
 
-    # Normalize missing positioning like your old version did
+    # Ensure positioning_score is present
     if "positioning_score" not in scores or scores["positioning_score"] is None:
         scores = {**scores, "positioning_score": default_positioning}
 
-    # Default weights (your original tuned version)
-    default_weights = {
-        "trend_score": 0.32,
-        "volatility_score": 0.18,
-        "volume_score": 0.18,
-        "rs_score": 0.22,
-        "positioning_score": 0.10,
-    }
-
-    # Allow overrides from config
-    w = weights or default_weights
+    # Decide weights
+    if weights is None:
+        weights = _resolve_regime_weights(cfg=cfg, regime=regime)
 
     # Weighted sum
-    c = 0.0
-    for k, weight in w.items():
-        c += weight * scores.get(k, 0.0)
+    num = 0.0
+    denom = 0.0
+    for name, w in weights.items():
+        value = scores.get(name, 0.0)
+        num += w * value
+        denom += w
 
-    # Clamp 0 → 100 like your old function
+    c = num / denom if denom else 0.0
+
+    # Clamp into [0, 100]
     c = max(0.0, min(100.0, c))
 
     return {"confluence_score": c}

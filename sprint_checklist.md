@@ -24,33 +24,33 @@ This checklist is structured to drop directly into your repo (e.g., `PROJECT_SPR
   - `patterns: list[str]`  
 
 ### **1.3 Market Regime Integration**
-- [ ] Confirm `data/market_health.py` returns standardized structure
-- [ ] Confirm `scoring/regimes.py` maps market health → regime
-- [ ] Ensure `scoring/confluence.py` uses regime-specific weights
+- [ x ] Confirm `data/market_health.py` returns standardized structure
+- [ x ] Confirm `scoring/regimes.py` maps market health → regime
+- [ x ] Ensure `scoring/confluence.py` uses regime-specific weights
 
 ---
 
 ## 2️⃣ Feature & Scoring Completion
 
 ### **2.1 Feature Computation**
-- [ ] Implement **trend** feature logic
-- [ ] Implement **volume** feature logic (RVOL, OBV slope, spikes)
-- [ ] Implement **volatility** indicators (BBW%, ATR%, percentiles)
-- [ ] Implement **relative strength** metrics (1M/3M returns, universe ranks)
-- [ ] Implement **positioning** metrics (funding z-score, OI changes)
+- [ x ] Implement **trend** feature logic
+- [ x ] Implement **volume** feature logic (RVOL, OBV slope, spikes)
+- [ x ] Implement **volatility** indicators (BBW%, ATR%, percentiles)
+- [ x ] Implement **relative strength** metrics (1M/3M returns, universe ranks)
+- [ x ] Implement **positioning** metrics (funding z-score, OI changes)
 
 ### **2.2 Component Scores (`src/scoring/`)**
-- [ ] `trend_score.py` → 0–100 Trend Score
-- [ ] `volume_score.py` → 0–100 Volume Score
-- [ ] `volatility_score.py` → 0–100 Volatility Score
-- [ ] `rs_score.py` → 0–100 RS Score
-- [ ] `positioning_score.py` → 0–100 Positioning Score
-- [ ] Validate score normalizations (min/max caps, percentiles, etc.)
+- [ x ] `trend_score.py` → 0–100 Trend Score
+- [ x ] `volume_score.py` → 0–100 Volume Score
+- [ x ] `volatility_score.py` → 0–100 Volatility Score
+- [ x ] `rs_score.py` → 0–100 RS Score
+- [ x ] `positioning_score.py` → 0–100 Positioning Score
+- [ x ] Validate score normalizations (min/max caps, percentiles, etc.)
 
 ### **2.3 Confluence Score**
 - [ ] Pull component scores
-- [ ] Apply regime-weighting
-- [ ] Implement missing-value fallbacks
+- [ x ] Apply regime-weighting
+- [ x ] Implement missing-value fallbacks
 - [ ] Final `confluence_score: float` output
 
 ---
@@ -67,12 +67,12 @@ This checklist is structured to drop directly into your repo (e.g., `PROJECT_SPR
   - [ ] `rsi_divergence.py`
 
 ### **3.2 Main Pipeline Wiring (`src/main.py`)**
-- [ ] Fetch OHLCV + derivatives for each symbol/timeframe
-- [ ] Compute all features
-- [ ] Compute all component scores
-- [ ] Compute confluence score
+- [ x ] Fetch OHLCV + derivatives for each symbol/timeframe
+- [ x ] Compute all features
+- [ x ] Compute all component scores
+- [ x ] Compute confluence score
 - [ ] Run pattern detection
-- [ ] Assemble `ScoreBundle`
+- [ x ] Assemble `ScoreBundle`
 - [ ] Collect results for ranking/reporting/alerts
 
 ### **3.3 Ranking & Filtering (`src/ranking/`)**
@@ -81,7 +81,7 @@ This checklist is structured to drop directly into your repo (e.g., `PROJECT_SPR
   - [ ] confluence score  
   - [ ] RS score  
   - [ ] pattern presence  
-- [ ] Support top-N selection via config
+- [ x ] Support top-N selection via config
 
 ### **3.4 Daily Report (`src/reports/daily_report.py`)**
 - [ ] Render market regime summary
