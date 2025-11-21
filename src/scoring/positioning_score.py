@@ -22,33 +22,29 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 def _funding_crowding_score(funding_rate: float) -> float:
     """
-    Simple 'crowding' score from funding.
+    Map perp funding rate to a 0–100 crowding score.
 
-    We don't assume a specific unit. Heuristic:
-      - best when funding ~ 0 (balanced)
-      - penalize large |funding| as crowded
+    - funding_rate near 0 -> score ~100 (uncrowded)
+    - larger |funding_rate| -> lower score (more crowded)
+    - |funding_rate| >= max_abs -> score bottoms near 10
     """
+    abs_fr = abs(funding_rate or 0.0)
 
-    # Treat funding_rate as "per interval" decimal; typical ranges are tiny.
-    # We'll work on absolute value.
-    f_abs = abs(funding_rate)
+    # This is the "this is definitely crowded" threshold.
+    # 0.0005 = 0.05% per funding interval; tweak as you like.
+    max_abs = 0.0005
 
-    # Below 0.01% -> basically flat -> ~100
-    # 0.01%..0.05% -> gently down toward 60
-    # 0.05%..0.20% -> down toward 20
-    # >=0.20% -> capped at 10
-    if f_abs <= 0.0001:  # 0.01%
+    if abs_fr <= 0.0:
         return 100.0
-    if f_abs <= 0.0005:  # 0.05%
-        # 0.0001..0.0005 -> 100..60
-        t = (f_abs - 0.0001) / (0.0005 - 0.0001)
-        return 100.0 - t * 40.0
-    if f_abs <= 0.002:  # 0.20%
-        # 0.0005..0.002 -> 60..20
-        t = (f_abs - 0.0005) / (0.002 - 0.0005)
-        return 60.0 - t * 40.0
 
-    return 10.0
+    # Cap at max_abs so extreme outliers don't matter more than "very crowded"
+    if abs_fr >= max_abs:
+        return 10.0
+
+    # Linearly interpolate from 100 (at 0) down to 10 (at max_abs)
+    ratio = abs_fr / max_abs  # 0 → 1
+    score = 100.0 - 90.0 * ratio  # 100 → 10
+    return max(0.0, min(100.0, score))
 
 
 def _oi_build_up_score(oi_change: float) -> float:
@@ -108,6 +104,7 @@ def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
         "positioning_funding_crowding_score": s_funding,
         "positioning_oi_build_up_score": s_oi,
     }
+    print(debug_features)
 
     return PositioningScoreResult(score=_clamp(score), features=debug_features)
 

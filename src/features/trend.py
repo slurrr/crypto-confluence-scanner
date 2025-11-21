@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Sequence
 from ..data.models import Bar
 from collections.abc import Mapping
 FeatureDict = Dict[str, float]
@@ -123,7 +123,7 @@ def compute_ma_slope_percent(
     return (ma_end - ma_start) / ma_start * 100.0
 
 
-def compute_trend_features(bars: List[Bar]) -> FeatureDict:
+def compute_trend_features(bars: Sequence[Bar]) -> FeatureDict:
     """
     Canonical Trend feature API.
 

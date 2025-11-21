@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+src/alerts/notifier.py
+src/patterns/divergence.py
+src/alerts/real_time.py
+src/scratch.py
+src/debug_features.py
+src/debug_alerts.py
+scripts/print_scores_for_symbol.py
+sprint_checklist.md

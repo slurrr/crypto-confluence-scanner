@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Sequence
 
+from .data.models import DerivativesMetrics
+
 try:
     import yaml  # type: ignore
 except ImportError:
@@ -94,7 +96,14 @@ def run_scan(config_path: str = "config.yaml") -> None:
         "Scanning %d symbols on timeframes %s",
         len(symbols),
         ", ".join(timeframes),
-    )  
+    )
+    
+    derivatives_by_symbol = repo.fetch_derivatives_for_symbols(symbols)
+    log.info("Sample derivatives (first 3): %s", {
+        s: derivatives_by_symbol.get(s)
+        for s in symbols[:3]
+    })
+
 
     # Market health (regime detection)
     health = compute_market_health(repo, universe)
@@ -111,9 +120,9 @@ def run_scan(config_path: str = "config.yaml") -> None:
                 timeframe=timeframe,
                 cfg=cfg,
                 regime=regime,
-                # universe_returns=...,          # plug in later if/when you have it
-                # derivatives_by_symbol=...,     # plug in later for futures/positioning
+                derivatives_by_symbol=derivatives_by_symbol, 
                 # weights={"trend_score": 1.0},  # plug in from config if you add weights
+                # universe_returns=...,          # plug in later if/when you have it
             )
         except Exception as e:
             log.exception("Error while running timeframe %s: %s", timeframe, e)

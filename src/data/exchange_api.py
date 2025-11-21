@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from math import log
+from typing import List, Optional, Dict, Any, Sequence
 
 import ccxt  # type: ignore
 
 from .models import Bar, SymbolMeta, DerivativesMetrics
+
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class ExchangeAPI(ABC):
@@ -222,6 +227,7 @@ class CcxtExchangeAPI(ExchangeAPI):
         if self._deriv_exchange is None:
             return DerivativesMetrics(symbol=symbol)
 
+        # Map spot symbol (e.g. "BTC/USDT") to the perp/futures symbol
         deriv_symbol = self._map_to_deriv_symbol(symbol)
         if deriv_symbol is None:
             # Can't map this spot symbol to a futures contract
@@ -234,21 +240,36 @@ class CcxtExchangeAPI(ExchangeAPI):
         # --- Funding rate ---
         try:
             fr = None
-            if hasattr(self._deriv_exchange, "fetchFundingRate"):
-                fr = self._deriv_exchange.fetchFundingRate(deriv_symbol)
-            elif hasattr(self._deriv_exchange, "fetch_funding_rate"):
-                fr = self._deriv_exchange.fetch_funding_rate(deriv_symbol)
+            de = self._deriv_exchange
+
+            if hasattr(de, "fetchFundingRate"):
+                fr = de.fetchFundingRate(deriv_symbol)
+            elif hasattr(de, "fetchFundingRates"):
+                frs = de.fetchFundingRates([deriv_symbol])
+                if frs:
+                    fr = frs[0]
+            elif hasattr(de, "fetch_funding_rate"):
+                fr = de.fetch_funding_rate(deriv_symbol)
+            else:
+                log.debug("No funding rate method on %s", de.id)
+
+            log.debug("Funding raw for %s: %r", deriv_symbol, fr)
 
             if fr:
-                funding_rate = (
-                    fr.get("fundingRate")
-                    or fr.get("fundingRateDaily")
-                    or fr.get("info", {}).get("fundingRate")
-                )
-                if funding_rate is not None:
-                    funding_rate = float(funding_rate)
-        except Exception:
-            pass
+                # normalize list/dict shapes
+                if isinstance(fr, list) and fr:
+                    fr = fr[0]
+                if isinstance(fr, dict):
+                    val = (
+                        fr.get("fundingRate")
+                        or fr.get("fundingRateDaily")
+                        or fr.get("info", {}).get("fundingRate")
+                    )
+                    if val is not None:
+                        funding_rate = float(val)
+        except Exception as e:
+            log.warning("Funding fetch failed for %s: %s", deriv_symbol, e)
+
 
         # --- Current open interest ---
         try:
@@ -313,3 +334,15 @@ class CcxtExchangeAPI(ExchangeAPI):
             funding_z=None,
             oi_change=oi_change_pct,
         )
+    
+    def fetch_derivatives_for_symbols(
+        self, symbols: Sequence[str]
+    ) -> Dict[str, DerivativesMetrics]:
+        result: Dict[str, DerivativesMetrics] = {}
+        for sym in symbols:
+            try:
+                result[sym] = self.get_derivatives_metrics(sym)
+            except Exception:
+                # If anything goes wrong, fall back to "empty" metrics
+                result[sym] = DerivativesMetrics(symbol=sym)
+        return result

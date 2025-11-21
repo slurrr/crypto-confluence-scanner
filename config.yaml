@@ -30,23 +30,24 @@ confluence:
   default_regime: sideways
   regime_weights:
     bull:
-      trend: 0.30
-      volume: 0.25
-      volatility: 0.10
-      rs: 0.25
-      positioning: 0.10
+      trend_score: 0.30
+      volume_score: 0.25
+      volatility_score: 0.10
+      rs_score: 0.25
+      positioning_score: 0.10
     sideways:
-      trend: 0.20
-      volume: 0.25
-      volatility: 0.25
-      rs: 0.20
-      positioning: 0.10
+      trend_score: 0.20
+      volume_score: 0.25
+      volatility_score: 0.25
+      rs_score: 0.20
+      positioning_score: 0.10
     bear:
-      trend: 0.25
-      volume: 0.15
-      volatility: 0.20
-      rs: 0.20
-      positioning: 0.20
+      trend_score: 0.25
+      volume_score: 0.15
+      volatility_score: 0.20
+      rs_score: 0.20
+      positioning_score: 0.20
+
 
 regimes:
   bull_min_risk_on: 65

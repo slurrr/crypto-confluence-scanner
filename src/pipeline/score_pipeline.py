@@ -54,25 +54,28 @@ def compute_all_features(
 def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
     """
     Run all score modules and merge results into a single dict.
-
-    If your compute_*_score functions currently return floats,
-    you can wrap them into dicts here.
     """
+
     s_trend = compute_trend_score(features)
     s_volume = compute_volume_score(features)
     s_volatility = compute_volatility_score(features)
     s_rs = compute_relative_strength_score(features)
     s_positioning = compute_positioning_score(features)
 
-    # If the above return floats, wrap them like:
-    # "trend_score": s_trend, etc.
+    # Unwrap any result objects that expose `.score`
+    def _as_float(x):
+        return x.score if hasattr(x, "score") else x
+
     scores: Dict[str, float] = {
-        "trend_score": s_trend,
-        "volume_score": s_volume,
-        "volatility_score": s_volatility,
-        "rs_score": s_rs,
-        "positioning_score": s_positioning,
+        "trend_score": _as_float(s_trend),
+        "volume_score": _as_float(s_volume),
+        "volatility_score": _as_float(s_volatility),
+        "rs_score": _as_float(s_rs),
+        "positioning_score": _as_float(s_positioning),
     }
+    print("DEBUG raw positioning:", s_positioning)
+    print("DEBUG positioning_score float:", _as_float(s_positioning))
+
     return scores
 
 
@@ -99,6 +102,7 @@ def build_score_bundle_for_bars(
         derivatives=derivatives,
     )
     scores = compute_all_scores(features)
+
 
     #confluence_cfg = cfg.get("confluence", {}) if cfg else {}
     confluence = compute_confluence_score(
@@ -179,6 +183,17 @@ def compile_score_bundles_for_universe(
             regime=regime,
             weights=weights,
         )
+        # DEBUG: show positioning inputs
+        if symbol == symbols[0]:  # just one symbol to avoid spam
+            print(
+                "DEBUG positioning for", symbol,
+                "funding=",
+                bundle.features.get("positioning_funding_rate"),
+                "oi_change=",
+                bundle.features.get("positioning_oi_change_pct"),
+                "has_deriv=",
+                bundle.features.get("positioning_has_derivatives_data"),
+            )
         bundles.append(bundle)
 
     return bundles

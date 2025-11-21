@@ -445,11 +445,11 @@ Use this as a living checklist. Mark items `[x]` as they become solid and tested
 - [x] Directory layout (`data`, `features`, `scoring`, `patterns`, `ranking`, `alerts`, `reports`, `backtest`) created.
 - [x] `config.yaml` with timeframes, exchange, ranking, alerts.
 - [ ] Expand `config.yaml` with explicit `scoring` / `regimes` / `patterns` sections.
-- [ ] Confirm `data/market_health.py` API and integration with `scoring/regimes.py`.
+- [x] Confirm `data/market_health.py` API and integration with `scoring/regimes.py`.
 
 ### 7.2 Feature & Scoring Implementation
 
-- [ ] Ensure each `features/*.py` exposes a clear, documented API (input: list[Bar], output: dict of feature values).
+- [x] Ensure each `features/*.py` exposes a clear, documented API (input: list[Bar], output: dict of feature values).
 - [ ] Ensure each `scoring/*_score.py` maps those feature dicts → 0–100 scores as per the quant model.
 - [ ] Ensure `confluence.py` uses regime-aware weighting and handles missing components gracefully.
 
@@ -476,8 +476,8 @@ Use this as a living checklist. Mark items `[x]` as they become solid and tested
 When opening a new ChatGPT conversation to work on this project:
 
 1. Say **explicitly**:  
-   - “Repo: `crypto-confluence-scanner`”  
-   - “Project spec is in `PROJECT_SPEC.md`.”
+   - “Repo: `crypto-confluence-scanner` Project spec is in `PROJECT_SPEC.md`.”  
+   - 
 2. Paste the relevant section(s) from this file (e.g., module responsibilities, config, or Confluence Score summary).
 3. Ask for changes *in terms of this spec*, e.g.:
    - “Implement `scoring/trend_score.py` to match §6 Trend Score behavior.”

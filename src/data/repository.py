@@ -66,6 +66,11 @@ class DataRepository:
 
     def fetch_derivatives(self, symbol: str) -> DerivativesMetrics:
         return self.api.get_derivatives_metrics(symbol)
+    
+    def fetch_derivatives_for_symbols(
+            self, symbols: Sequence[str]
+        ) -> Dict[str, DerivativesMetrics]:
+            return self.api.fetch_derivatives_for_symbols(symbols)
 
    # --- Market Health ---
 

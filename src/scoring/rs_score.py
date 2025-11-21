@@ -63,7 +63,7 @@ def compute_relative_strength_score(
           - score: 0..100
           - features: dict of raw + component scores
     """
-    if not isinstance(features, Mapping) or not features:
+    if not features:
         # Too little data; neutral-ish, empty features.
         return RelativeStrengthScoreResult(score=50.0, features={})
 
