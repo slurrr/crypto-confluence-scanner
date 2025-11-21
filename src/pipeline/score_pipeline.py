@@ -104,13 +104,16 @@ def build_score_bundle_for_bars(
     scores = compute_all_scores(features)
 
 
-    #confluence_cfg = cfg.get("confluence", {}) if cfg else {}
-    confluence = compute_confluence_score(
-        scores,
-        weights=weights,  # optional explicit override
-        regime=regime,
+    # confluence_cfg = cfg.get("confluence", {}) if cfg else {}
+    conf_result = compute_confluence_score(
+        scores=scores,
+        weights=weights,   # optional explicit override
+        regime=regime,     # already resolved by MarketHealth
         cfg=cfg,
-    )["confluence_score"]
+    )
+
+    confluence = conf_result.confluence_score
+
 
     return ScoreBundle(
         symbol=symbol,

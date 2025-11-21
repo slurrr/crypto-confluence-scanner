@@ -1,9 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
-
-# Fallback regime if nothing is configured / passed
-DEFAULT_REGIME = "sideways"
 
 # If config is totally missing, we’ll fall back to equal weights on these:
 DEFAULT_SCORE_KEYS = [
@@ -29,6 +27,35 @@ SCORE_KEY_ALIASES: Dict[str, str] = {
 }
 
 
+@dataclass
+class ConfluenceScoreResult:
+    """
+    Standard API wrapper for the final confluence score.
+
+    Attributes
+    ----------
+    confluence_score:
+        Final score in [0, 100].
+
+    regime:
+        The regime label that was used for weighting
+        (e.g. "bull", "sideways", "bear"). This should come
+        from MarketHealth or an equivalent regime classifier.
+
+    weights:
+        The effective weights used for each canonical component key
+        (e.g. {"trend_score": 0.3, ...}).
+
+    component_scores:
+        The component scores that were fed into the computation
+        (typically ScoreBundle.scores).
+    """
+    confluence_score: float
+    regime: Optional[str]
+    weights: Dict[str, float]
+    component_scores: Dict[str, float]
+
+
 # ---------------------------------------------------------------------------
 # Small helpers to safely read from both dict-like configs and OmegaConf-style
 # objects (cfg.confluence.regime_weights, etc.)
@@ -42,7 +69,6 @@ def _get_attr_or_key(obj: Any, key: str, default: Any = None) -> Any:
     # OmegaConf / attr-style
     try:
         value = getattr(obj, key)
-        # OmegaConf returns MISSING sometimes; treat falsy as missing
         if value is not None:
             return value
     except AttributeError:
@@ -61,15 +87,9 @@ def _get_confluence_section(cfg: Optional[Mapping[str, Any]]) -> Any:
     return _get_attr_or_key(cfg, "confluence", cfg)
 
 
-def _resolve_regime(regime: Optional[str], cfg: Optional[Mapping[str, Any]]) -> str:
-    conf_section = _get_confluence_section(cfg)
-    default_regime = _get_attr_or_key(conf_section, "default_regime", DEFAULT_REGIME)
-    return (regime or default_regime or DEFAULT_REGIME).lower()
-
-
 def _resolve_regime_weights(
     cfg: Optional[Mapping[str, Any]],
-    regime: Optional[str],
+    regime: str,
 ) -> Dict[str, float]:
     """
     Resolve regime-specific weights from config, normalizing keys to canonical
@@ -78,7 +98,6 @@ def _resolve_regime_weights(
     Supports config like:
 
       confluence:
-        default_regime: sideways
         regime_weights:
           bull:
             trend: 0.30
@@ -86,12 +105,11 @@ def _resolve_regime_weights(
             volatility: 0.10
             rs: 0.25
             positioning: 0.10
-          ...
 
     or the same with *_score keys.
     """
-    # If there is no cfg at all, fall back to equal weights.
     if cfg is None:
+        # No config at all -> equal weights over the default keys.
         if not DEFAULT_SCORE_KEYS:
             return {}
         equal = 1.0 / len(DEFAULT_SCORE_KEYS)
@@ -100,14 +118,14 @@ def _resolve_regime_weights(
     conf_section = _get_confluence_section(cfg)
     regime_weights_root = _get_attr_or_key(conf_section, "regime_weights")
 
-    resolved_regime = _resolve_regime(regime, cfg)
+    if regime is None:
+        raise ValueError("regime must be provided when cfg-based weights are used")
 
-    # Grab the mapping for this regime, if present
-    regime_map = _get_attr_or_key(regime_weights_root, resolved_regime, default=None)
+    regime_key = str(regime).lower()
+    regime_map = _get_attr_or_key(regime_weights_root, regime_key, default=None)
 
     canonical: Dict[str, float] = {}
 
-    # Best case: regime_map is mapping-like, so we can iterate directly
     if isinstance(regime_map, Mapping):
         items = regime_map.items()
     else:
@@ -130,8 +148,8 @@ def _resolve_regime_weights(
             continue
         canonical[canonical_key] = w
 
-    # If nothing was configured / resolved, fall back to equal weights
     if not canonical:
+        # Nothing configured for this regime -> equal weights fallback.
         if not DEFAULT_SCORE_KEYS:
             return {}
         equal = 1.0 / len(DEFAULT_SCORE_KEYS)
@@ -147,11 +165,10 @@ def _resolve_regime_weights(
 def compute_confluence_score(
     scores: Dict[str, float],
     *,
-    weights: Optional[Dict[str, float]] = None,
     regime: Optional[str] = None,
     cfg: Optional[Mapping[str, Any]] = None,
-    default_positioning: float = 50.0,
-) -> Dict[str, float]:
+    weights: Optional[Dict[str, float]] = None,
+) -> ConfluenceScoreResult:
     """
     Compute a final confluence_score in the range [0, 100].
 
@@ -168,47 +185,50 @@ def compute_confluence_score(
             ...
         }
 
-    weights:
-        Optional explicit weight dict keyed by canonical score keys
-        (e.g. "trend_score", "volume_score", ...). If provided, this wins.
-
     regime:
-        Optional regime label (e.g. "bull", "sideways", "bear").
-        If omitted, we’ll use confluence.default_regime from config or
-        DEFAULT_REGIME.
+        Regime label (e.g. "bull", "sideways", "bear") that has already been
+        resolved upstream, usually by MarketHealth / regimes.py.
 
     cfg:
         Full config object (mapping or OmegaConf). Used to resolve
-        confluence.regime_weights and confluence.default_regime.
+        confluence.regime_weights if explicit weights are not provided.
 
-    default_positioning:
-        If "positioning_score" is missing from `scores`, this default is used
-        so that positioning can still contribute under regime weighting.
+    weights:
+        Optional explicit weight dict keyed by canonical score keys
+        (e.g. "trend_score", "volume_score", ...). If provided, this takes
+        precedence over cfg/regime-based resolution.
 
     Returns
     -------
-    dict:
-        {"confluence_score": float in [0, 100]}
+    ConfluenceScoreResult
+        Wrapper containing the final confluence_score plus regime,
+        effective weights, and component scores.
     """
-    # Start from a shallow copy so we don't mutate caller's dict
-    working_scores: Dict[str, float] = dict(scores)
 
-    # Ensure positioning has *some* value if regime weighting expects it
-    working_scores.setdefault("positioning_score", default_positioning)
+    # Copy so we don't mutate the caller's dict
+    working_scores: Dict[str, float] = dict(scores)
 
     # Decide which weights to use
     if weights is None:
+        if regime is None:
+            raise ValueError("regime is required when weights are not explicitly provided")
         weights = _resolve_regime_weights(cfg, regime)
 
-    if not weights:
-        # No weights at all → no contribution; just return 0.0
-        return {"confluence_score": 0.0}
+    effective_weights: Dict[str, float] = dict(weights or {})
 
-    # Weighted sum over *available* scores, skipping missing/None values
+    if not effective_weights:
+        # No weights at all -> return a structured zero, preserving inputs
+        return ConfluenceScoreResult(
+            confluence_score=0.0,
+            regime=regime,
+            weights={},
+            component_scores=working_scores,
+        )
+
     num = 0.0
     denom = 0.0
 
-    for name, w in weights.items():
+    for name, w in effective_weights.items():
         value = working_scores.get(name)
         if value is None:
             continue
@@ -227,4 +247,9 @@ def compute_confluence_score(
     elif c > 100.0:
         c = 100.0
 
-    return {"confluence_score": c}
+    return ConfluenceScoreResult(
+        confluence_score=c,
+        regime=regime,
+        weights=effective_weights,
+        component_scores=working_scores,
+    )
