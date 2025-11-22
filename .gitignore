@@ -205,11 +205,39 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-src/alerts/notifier.py
-src/patterns/divergence.py
-src/alerts/real_time.py
-src/scratch.py
-src/debug_features.py
-src/debug_alerts.py
-scripts/print_scores_for_symbol.py
-sprint_checklist.md
+
+# --- Python artifacts (already mostly covered) ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build / dist (if you ever package it)
+build/
+dist/
+*.egg-info/
+
+# VS Code local settings (optional: keep if you want workspace-specific config in git)
+.vscode/
+
+# --- Project-specific: generated reports / state / scratch ---
+
+# Generated daily report markdowns
+reports/daily_report_*.md
+
+# Any other auto-generated report files (adjust as needed)
+reports/*.md
+
+# Local alert state / runtime state
+alerts_state.json
+
+# Scratch or one-off scripts (centralize them in scripts/)
+scripts/
+scratch.py
+
+# Old standalone debug scripts (if you reintroduce them)
+debug_*.py

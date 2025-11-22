@@ -1,7 +1,7 @@
 {
     // Use the project virtual environment
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
-    "python.terminal.activateEnvironment": true
+    "python.terminal.activateEnvironment": true,
     // Enable linting (optional but recommended)
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": true,
