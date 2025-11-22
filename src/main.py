@@ -99,11 +99,12 @@ def run_scan(config_path: str = "config.yaml") -> None:
     )
     
     derivatives_by_symbol = repo.fetch_derivatives_for_symbols(symbols)
+    '''
     log.info("Sample derivatives (first 3): %s", {
         s: derivatives_by_symbol.get(s)
         for s in symbols[:3]
     })
-
+    '''
 
     # Market health (regime detection)
     health = compute_market_health(repo, universe)

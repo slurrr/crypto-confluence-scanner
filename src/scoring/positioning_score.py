@@ -104,7 +104,7 @@ def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
         "positioning_funding_crowding_score": s_funding,
         "positioning_oi_build_up_score": s_oi,
     }
-    print(debug_features)
+    #print(debug_features)
 
     return PositioningScoreResult(score=_clamp(score), features=debug_features)
 

@@ -26,6 +26,8 @@ from ..scoring.confluence import (
 )
 from .filters import apply_filters
 
+import logging
+logger = logging.getLogger(__name__)
 
 @dataclass
 class RankedSymbol:
@@ -39,6 +41,7 @@ class RankedSymbol:
     positioning: PositioningScoreResult
     bars: Sequence[Bar]
     meta: SymbolMeta
+    #pattern: Sequence[Patterns] divergence, etc.
 
 
 def score_symbol(
@@ -121,6 +124,11 @@ def rank_universe(
 
     symbols_to_scan = universe[:max_symbols]
 
+    logger.info(
+        "[ranking] ranking %d symbols (max=%d)", 
+        len(symbols_to_scan), max_symbols
+    )
+
     ranked: List[RankedSymbol] = []
 
     for meta in symbols_to_scan:
@@ -130,6 +138,10 @@ def rank_universe(
 
     # Apply filters
     filtered = apply_filters(ranked, filter_cfg)
+    logger.info(
+        "[ranking] returning %d ranked symbols", 
+        len(filtered)
+    )
 
     # Sort descending by confluence score
     filtered.sort(key=lambda r: r.confluence.confluence_score, reverse=True)

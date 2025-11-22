@@ -48,10 +48,10 @@ This checklist is structured to drop directly into your repo (e.g., `PROJECT_SPR
 - [ x ] Validate score normalizations (min/max caps, percentiles, etc.)
 
 ### **2.3 Confluence Score**
-- [ ] Pull component scores
+- [ x ] Pull component scores
 - [ x ] Apply regime-weighting
 - [ x ] Implement missing-value fallbacks
-- [ ] Final `confluence_score: float` output
+- [ x ] Final `confluence_score: float` output
 
 ---
 

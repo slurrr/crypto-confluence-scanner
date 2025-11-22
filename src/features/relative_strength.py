@@ -81,7 +81,7 @@ def compute_rs_features(
     """
     # Keep similar data requirement as original RS score: need some history.
     if len(bars) < 40:
-        return None
+        return {}
 
     bars_list = list(bars)
     rets = compute_multi_horizon_returns(bars_list, horizons=[20, 60, 120])

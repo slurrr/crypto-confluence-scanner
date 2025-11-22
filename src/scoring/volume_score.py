@@ -109,7 +109,7 @@ def compute_volume_score(features: FeatureDict) -> VolumeScoreResult:
     w_pct = 0.30
 
     score = w_rvol * s_rvol + w_slope * s_slope + w_pct * s_pct
-
+    
     debug_features: Dict[str, float] = {
         # raw
         "volume_rvol_20_1": rvol,
@@ -120,7 +120,7 @@ def compute_volume_score(features: FeatureDict) -> VolumeScoreResult:
         "volume_trend_slope_score": s_slope,
         "volume_percentile_score": s_pct,
     }
-
+    #print(debug_features)
     return VolumeScoreResult(score=_clamp(score), features=debug_features)
 
 

@@ -122,6 +122,7 @@ Treat these as **production / architectural** modules:
 - `src/data/*`
 - `src/features/*`
 - `src/scoring/*`
+- `src/score_pipeline/*`
 - `src/patterns/*`
 - `src/ranking/*`
 - `src/reports/*`
@@ -135,6 +136,8 @@ Treat these as **debug/scratch helpers** (not to be used as architectural refere
 - `src/debug_features.py`
 - `src/debug_ranking.py`
 - `src/debug_scores.py`
+- `src/scripts/*.py`
+- `src/tests/*`
 - `src/scratch.py`
 
 When asking for help in future chats, always refer to the production modules above, not the debug ones.
@@ -146,32 +149,67 @@ When asking for help in future chats, always refer to the production modules abo
 From `config.yaml.txt`:
 
 ```yaml
-timeframes:
-  - 1d
+data_repository:
+  timeframes: ["1d", "4h"]
+  max_symbols: 100
+
 
 exchange:
   id: binance
+  derivatives:
+    id: binanceusdm     # CCXT id for Binance USDT-M futures
+
+universe:
   symbols:
     - BTC/USDT
     - ETH/USDT
     - ZEC/USDT
     - LTC/USDT
 
-  derivatives:
-    id: binanceusdm     # CCXT id for Binance USDT-M futures
-
 ranking:
   max_symbols: 20   # cap how many symbols you scan per run
 
 #filters:
-#  min_trend_score: 25
-#  min_rs_score: 20
-#  min_volume_score: 30
-#  min_volatility_score: 0
-#  max_atr_pct: 25
-#  max_bb_width_pct: 60
+#  min_trend_score: 25        # require at least moderate trend quality
+#  min_rs_score: 20           # require at least moderate relative strength
+#  min_volume_score: 30    # weed out the truly dead names
+#  min_volatility_score: 0    # keep all for now, or raise if you want squeezes only
+#  max_atr_pct: 25            # avoid super-crazy ATR%
+#  max_bb_width_pct: 60       # avoid names with massive expansion
 
-  reports:
+confluence:
+  default_regime: sideways
+  regime_weights:
+    bull:
+      trend_score: 0.30
+      volume_score: 0.25
+      volatility_score: 0.10
+      rs_score: 0.25
+      positioning_score: 0.10
+    sideways:
+      trend_score: 0.20
+      volume_score: 0.25
+      volatility_score: 0.25
+      rs_score: 0.20
+      positioning_score: 0.10
+    bear:
+      trend_score: 0.25
+      volume_score: 0.15
+      volatility_score: 0.20
+      rs_score: 0.20
+      positioning_score: 0.20
+
+
+regimes:
+  bull_min_risk_on: 65
+  bull_min_breadth: 60
+  bull_min_trend: 60
+
+  bear_max_risk_on: 35
+  bear_max_breadth: 40
+  bear_max_trend: 40
+
+reports:
   top_n: 20
   output_dir: reports
 
@@ -196,26 +234,28 @@ alerts:
     volume_spike: true
     squeeze_candidate: true
     regime_change: true
-    rsi_divergence: true
+    rsi_divergence: true   
 
   # Per-type extra thresholds
-  volume_spike_min_volume_score: 75
-  squeeze_max_vol_score: 40
-  squeeze_max_bbw_pct: 6
+  volume_spike_min_volume_score: 75      # volume spike detection
+  squeeze_max_vol_score: 40             # low volatility score
+  squeeze_max_bbw_pct: 6                # low BB width (% of mid)
   rsi_divergence_timeframes:
     - "4h"
     - "1h"
     - "15m"
-  rsi_divergence_lookback: 300
+  rsi_divergence_lookback: 300    # bars to fetch
   rsi_divergence_pivot_lookback: 2
-  rsi_divergence_min_strength: 1
-  rsi_divergence_max_bars_from_last: 10
+  rsi_divergence_min_strength: 1  # minimum RSI difference between pivots
+  rsi_divergence_max_bars_from_last: 10  # <= divergence must finish within last n bar(s)
 
   # Turn detailed divergence logging on/off
   rsi_divergence_debug: true
 
   # Timezone for divergence debugging logs
+  # Examples: "UTC", "America/Denver", "America/Chicago", "Europe/London"
   rsi_divergence_timezone: "America/Denver"
+
 
   telegram:
     enabled: false
@@ -253,7 +293,7 @@ If you later expand config with scoring regimes, patterns, storage, etc., **add 
 
 ## 4. High-Level Behavior (What the Scanner Does)
 
-**Goal:** For each run, take a set of symbols and timeframes, compute a **Confluence Score (0–100)** per symbol, detect setups (breakout, squeeze, etc.), rank them, and optionally send alerts + reports.
+**Goal:** For each run, take a set of symbols and timeframes, compute a **Confluence Score (0–100)** per symbol, detect setups (breakout, pullback, squeeze, diivergence etc.), rank them, and optionally send alerts + reports.
 
 ### 4.1 Batch Pipeline (Target / Conceptual)
 
@@ -286,8 +326,8 @@ This is the conceptual flow (what `src/main.py` is evolving toward):
       - `rsi_divergence.py`
    7. Pass scored+tagged symbols into `ranking/filters.py` + `ranking/ranking.py`.
 6. Generate **report** via `reports/daily_report.py` (saved into `reports/`).
-7. Generate **alerts** via `alerts/engine.py` + `alerts/notifiers.py` using config thresholds, updating `alerts_state.json` for dedupe.
-8. Optionally, capture outputs in storage (DB, files) and/or run **backtests**.
+7. Generate **alerts** via `alerts/engine.py` + `alerts/notifiers.py` + `alerts/type.py` + `alerts/state.py` using config thresholds, updating `alerts_state.json` for dedupe.
+8. Later, capture outputs in storage (DB, files) and/or run **backtests**.
 
 Actual implementation may differ in small details, but **all helpers and new code should work within this pipeline**.
 

@@ -92,7 +92,7 @@ def compute_volatility_score(features: FeatureDict) -> VolatilityScoreResult:
     w_contr = 0.35
 
     score = w_atr * s_atr + w_bb * s_bb + w_contr * s_contr
-
+    
     debug_features: Dict[str, float] = {
         # raw
         "volatility_atr_pct_14": atr_pct,
@@ -103,7 +103,7 @@ def compute_volatility_score(features: FeatureDict) -> VolatilityScoreResult:
         "volatility_bb_width_score": s_bb,
         "volatility_contraction_ratio_score": s_contr,
     }
-
+    #print(debug_features)
     return VolatilityScoreResult(score=_clamp(score), features=debug_features)
 
 

@@ -93,7 +93,7 @@ def compute_relative_strength_score(
         "rs_ret_60_score": s_60,
         "rs_ret_120_score": s_120,
     }
-
+    #print(debug_features)
     return RelativeStrengthScoreResult(score=_clamp(score), features=debug_features)
 
 

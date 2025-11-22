@@ -1,0 +1,2138 @@
+
+Confluence Score Scanner – Architecture Plan
+
+
+
+1. Project Layout (Directory Tree)
+
+
+Below is a structured layout of the project repository, showing key modules and their purposes. Each file is briefly described:
+project_root/
+├── config.yaml                         # Global configuration (thresholds, weights, exchanges, schedule, etc.)
+├── src/
+│   ├── data/
+│   │   ├── __init__.py                 # Makes `data` a package
+│   │   ├── models.py                   # Data models (Bar, SymbolMeta, DerivativesMetrics, MarketHealth, ScoreBundle)
+│   │   ├── repository.py               # Data repository interface and implementations (PostgreSQL, CSV) for OHLCV, metrics, etc.
+│   │   ├── exchange_api.py             # Exchange API client abstraction (e.g. CCXT or REST) to fetch market data
+│   │   └── market_health.py            # Functions to compute overall market health & regime (using BTC trend, breadth, etc.)
+│   ├── features/
+│   │   ├── __init__.py                 # Makes `features` a package
+│   │   ├── trend.py                    # Trend indicator calculations (MAs, ADX, trend persistence metrics, etc.)
+│   │   ├── volatility.py               # Volatility indicator calculations (Bollinger Bands, ATR, contraction detection)
+│   │   ├── volume.py                   # Volume indicator calculations (RVOL, OBV, accumulation patterns)
+│   │   ├── relative_strength.py        # Relative strength calculations (returns vs BTC, universe percentile ranks)
+│   │   └── positioning.py              # Positioning/sentiment calculations (funding, open interest metrics)
+│   ├── scoring/
+│   │   ├── __init__.py                 # Makes `scoring` a package
+│   │   ├── trend_score.py              # Computes Trend component score (0-100) from trend features
+│   │   ├── volume_score.py             # Computes Volume component score (0-100) from volume features
+│   │   ├── volatility_score.py         # Computes Volatility component score (0-100) from volatility features
+│   │   ├── rs_score.py                 # Computes Relative Strength component score (0-100) from RS features
+│   │   ├── positioning_score.py        # Computes Positioning component score (0-100) from positioning features
+│   │   └── confluence.py               # Aggregates component scores into a Confluence Score (0-100), applying regime-based weights
+│   ├── patterns/
+│   │   ├── __init__.py                 # Makes `patterns` a package
+│   │   ├── breakout.py                 # Detection logic for breakout patterns (pivot breakouts with volume confirmation)
+│   │   ├── volatility_squeeze.py       # Detection logic for volatility squeeze setups (low volatility breakouts)
+│   │   ├── pullback.py                 # Detection logic for "Holy Grail" pullbacks (ADX trend + EMA20 touch)
+│   │   └── divergence.py               # Detection logic for RSI divergences (bullish & bearish divergences)
+│   ├── ranking/
+│   │   ├── __init__.py                 # Makes `ranking` a package
+│   │   ├── filters.py                  # Filtering functions (liquidity filter, feasibility filter, watchlist filter)
+│   │   └── ranking.py                  # Ranking logic for leaderboards (e.g. top RS, top Confluence, volume surges, etc.)
+│   ├── alerts/
+│   │   ├── __init__.py                 # Makes `alerts` a package
+│   │   ├── real_time.py                # Real-time alert dispatch (Telegram bot, webhooks) for immediate pattern signals
+│   │   └── notifier.py                 # Notification utilities (formatting alert messages, routing to channels)
+│   ├── reports/
+│   │   ├── __init__.py                 # Makes `reports` a package
+│   │   └── daily_report.py             # End-of-day report generation (markdown summary of market health and top opportunities)
+│   ├── backtest/
+│   │   ├── __init__.py                 # Makes `backtest` a package
+│   │   └── backtest_engine.py          # Backtesting/event-study logic to evaluate signals and compute performance metrics
+│   ├── main.py                         # Main execution pipeline orchestrating the data fetch, feature calc, scoring, and outputs
+│   └── __init__.py                     # Makes `src` a package
+├── scripts/
+│   ├── run_scan.py                     # Script to trigger a full market scan (could be called by cron/scheduler, calls src.main)
+│   └── run_backtest.py                 # Script to run backtesting analysis on historical data
+├── tests/
+│   ├── test_data_layer.py              # Tests for data models, repository (Postgres connectivity, file fallback)
+│   ├── test_features.py                # Unit tests for feature calculations (trend/volatility/volume/RS/positioning)
+│   ├── test_scoring.py                 # Tests for scoring functions (component score scaling and aggregation logic)
+│   ├── test_patterns.py                # Tests for pattern detection logic (breakout, squeeze, pullback, divergence)
+│   ├── test_ranking.py                 # Tests for ranking and filtering logic (leaderboards, filters apply correctly)
+│   ├── test_alerts.py                  # Tests for alert formatting and sending (Telegram and webhook integration stubs)
+│   └── test_backtest.py                # Tests for backtest engine (signal generation and outcome analysis)
+├── Dockerfile                          # Docker configuration for containerizing the scanner (install dependencies, set entrypoint)
+└── README.md                           # Documentation and usage instructions for the project
+Notes:
+
+•	The architecture is modular: each category of logic (data access, feature computation, scoring, patterns, etc.) is isolated in its own module or package. This makes it easy to extend or modify one part (e.g. add a new feature or scoring formula) without affecting others.
+•	All configurable parameters (thresholds, weights, etc.) are stored in config.yaml (or environment variables for sensitive info like DB credentials), not hard-coded in code. The code reads these values at runtime, ensuring easy tuning of the Confluence Score model.
+•	The data/repository.py implements a repository pattern to abstract data storage. By default it will use PostgreSQL (via an ORM or query layer) for OHLCV, scores, signals, etc., but it can be configured to use CSV/Parquet files for testing or alternative deployments. This separation ensures the system can swap out the data layer (e.g. to local files) without changing business logic.
+•	The data/exchange_api.py provides a CCXT-style interface to exchange endpoints. It hides specifics of different exchange APIs and provides a unified way to fetch ticker lists, historical candles, and derivatives metrics (funding rates, OI). This decoupling allows plugging in different sources (Binance, Coinbase, custom APIs) behind the same interface.
+•	The system is designed to run in scheduled batch mode (e.g., via cron or a scheduler like Airflow). The scripts/run_scan.py can be scheduled to run after each candle close (e.g. daily at a set time, or every 4 hours), triggering the pipeline. There is no continuous real-time loop—data is processed in batches, which suits a Dockerized deployment on a single server or VPS.
+•	Extensibility: while the focus is crypto (especially perpetual futures), the code and models are asset-agnostic where possible. For example, SymbolMeta and Bar can represent any instrument, and new data fields (like earnings for stocks) could be added later. The design allows adding new exchanges or asset classes with minimal changes (just implement new data adapters or extend feature calculations for specific asset types).
+
+
+
+2. Data Layer (Models & Interfaces)
+
+
+Data Models: We define core data structures as Python dataclasses (or Pydantic models for validation). These capture the fundamental data we work with:
+# src/data/models.py
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+@dataclass
+class Bar:
+    """OHLCV bar representing one period of market data."""
+    symbol: str           # unique symbol identifier or SymbolMeta reference
+    exchange: str         # exchange name or code
+    timestamp: datetime   # period end time (e.g., candle close time)
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+@dataclass
+class SymbolMeta:
+    """Metadata about a trading symbol/instrument."""
+    symbol: str           # symbol code (e.g., "BTC/USDT")
+    base_asset: str       # base asset (e.g., "BTC")
+    quote_asset: str      # quote asset or currency (e.g., "USDT")
+    exchange: str         # exchange name (e.g., "Binance")
+    is_perpetual: bool    # True if symbol is a perpetual futures contract (has funding/OI)
+    # Additional fields could include instrument type, sector, etc., for extensibility
+
+@dataclass
+class DerivativesMetrics:
+    """Derivatives market metrics for a symbol (for futures/perpetual swaps)."""
+    symbol: str
+    timestamp: datetime           # time of data point (e.g., funding interval)
+    funding_rate: Optional[float] # latest funding rate (e.g., 0.01 meaning 1%/8h)
+    open_interest: Optional[float]# open interest (number of outstanding contracts)
+    oi_change_24h: Optional[float]# 24h change in open interest (absolute or %)
+    funding_rate_z: Optional[float]# z-score of funding rate relative to recent history
+
+@dataclass
+class MarketHealth:
+    """Snapshot of overall market health and regime indicators."""
+    btc_trend: float or str       # e.g., BTC trend strength or trend category (could be a score or "up"/"down")
+    breadth: float                # percentage of symbols in uptrend (e.g., % above MA200 or similar)
+    regime: str                   # inferred market regime ("bull", "sideways", "bear")
+    # Additional health metrics: e.g., total market volume change, volatility index, etc.
+
+@dataclass
+class ScoreBundle:
+    """Container for all component scores for a symbol."""
+    trend: Optional[float]        # Trend Score (0-100)
+    volume: Optional[float]       # Volume Score (0-100)
+    volatility: Optional[float]   # Volatility Score (0-100)
+    relative_strength: Optional[float]  # RS Score (0-100)
+    positioning: Optional[float]  # Positioning/Sentiment Score (0-100), None if not applicable
+    confluence: Optional[float] = None  # Overall Confluence Score (0-100)
+    confidence: Optional[float] = None  # Data completeness confidence (e.g., fraction of components available)
+
+•	Bar: Represents a single OHLCV candle. This will typically correspond to a daily bar (since our scans run after daily close, or 4h bar if configured). We include symbol and exchange to uniquely identify the instrument.
+•	SymbolMeta: Holds static info about a trading symbol. It includes the exchange and whether it’s a perpetual futures contract (which implies availability of funding/OI data). This helps the system decide which metrics to fetch and which scoring components to apply. For extensibility, we can add fields like instrument type (crypto, equity, etc.) so the system can be used beyond crypto.
+•	DerivativesMetrics: Stores data unique to derivative instruments: funding rates, open interest, and their changes or z-scores. All fields are optional because not all symbols will have these (e.g., spot markets or equities). If a symbol has no derivatives data (e.g. is_perpetual=False), these would remain None and the positioning score will be skipped or treated as neutral.
+•	MarketHealth: Captures a high-level view of the market conditions. For example, btc_trend could be a numeric trend strength for Bitcoin or a categorical label (like Uptrend or Downtrend based on BTC’s moving averages or momentum). breadth might be calculated as the percentage of tracked symbols above a key MA or with positive trend scores. regime is an overall market regime classification (bull, bear, or sideways), which will influence how we weight the scores in the confluence model. This object is computed at run-time (not stored per symbol) and is used globally in the scoring phase.
+•	ScoreBundle: Aggregates all the component scores for a symbol. This makes it easy to pass around a symbol’s scores as one object. After computing all component scores, the pipeline will fill the confluence score (the weighted aggregate) and a confidence score indicating data completeness. For example, if a symbol is a spot market with no positioning data, we might set positioning=None and later compute confidence as 4/5 = 0.8 (only 4 out of 5 component scores were applicable).
+
+
+Data Fetch Interfaces: We design an exchange-agnostic data layer. This is achieved via a repository or gateway interface that defines what data operations are needed, without tying the code to a specific exchange or database. For example:
+# src/data/repository.py
+class DataRepository:
+    """Abstract repository for fetching market data and writing results."""
+
+    def discover_universe(self) -> list[SymbolMeta]:
+        """Discover or load the list of symbols to scan.
+        Could use exchange API (for all trading pairs) or read from config (static list)."""
+        raise NotImplementedError
+
+    def fetch_ohlcv(self, symbol: SymbolMeta, timeframe: str, start: datetime, end: datetime) -> list[Bar]:
+        """Fetch historical OHLCV data for the given symbol and timeframe.
+        This may query a database (PostgreSQL) or call an exchange API if needed."""
+        raise NotImplementedError
+
+    def fetch_derivatives_metrics(self, symbol: SymbolMeta, start: datetime, end: datetime) -> list[DerivativesMetrics]:
+        """Fetch recent derivatives metrics (funding, OI) for the symbol.
+        For perpetual futures, return a list of metrics over the time window. If not applicable, return an empty list."""
+        raise NotImplementedError
+
+    def compute_market_health(self, universe: list[SymbolMeta], recent_bars: dict[str, list[Bar]]) -> MarketHealth:
+        """Compute overall market health indicators (e.g., using BTC and other major assets).
+        Leverage broad market data (e.g., BTC trend, percentage of symbols in uptrend) to determine regime."""
+        raise NotImplementedError
+
+    # Additional methods for persisting results:
+    def save_scores(self, scores: list[ScoreBundle]): ...
+    def save_signals(self, signals: list): ...
+    def save_report(self, report: str): ...
+We will have concrete implementations of this interface, for example:
+
+•	PostgresRepository (DataRepository): connects to a PostgreSQL database to retrieve stored OHLCV data and metrics. This class would use an ORM (like SQLAlchemy) or raw SQL queries. It can also store the output of each run (scores, signals, logs) into the database for record-keeping and backtesting. The DB schema might have tables for bars, derivatives_metrics, scores, signals, etc.
+•	CCXTRepository or APIRepository (DataRepository): fetches data on the fly from exchange APIs if data is not pre-loaded. For instance, during universe discovery, it might call CCXT’s fetchMarkets() to list symbols. For OHLCV, it could call ccxt.fetch_ohlcv(symbol, timeframe) if data is not in DB. In practice, we might combine approaches: use API for latest data but also store it in Postgres for caching and future use. The design allows replacing the data source easily (since other asset classes or data vendors can be integrated by implementing these methods).
+
+
+Exchange Abstraction: In exchange_api.py, we define a thin layer to interact with exchanges:
+# src/data/exchange_api.py
+class ExchangeAPI:
+    """Abstract interface for exchange data access."""
+    def list_symbols(self) -> list[SymbolMeta]: ...
+    def get_ohlcv(self, symbol: str, timeframe: str, start: datetime, end: datetime) -> list[Bar]: ...
+    def get_funding_rates(self, symbol: str, start: datetime, end: datetime) -> list[DerivativesMetrics]: ...
+    def get_open_interest(self, symbol: str, start: datetime, end: datetime) -> list[DerivativesMetrics]: ...
+We can implement this for each exchange or use CCXT’s unified interface. For example, a CCXTExchangeAPI class that wraps a ccxt client and maps method calls to ccxt functions, and perhaps specialized classes for exchanges that need custom handling (like a direct REST call for open interest if CCXT lacks it). The repository can use an ExchangeAPI instance internally if it needs to fetch fresh data.
+
+Universe Discovery: This system can support dynamic universe selection or a static list:
+
+•	If config.universe.mode = "discover", the discover_universe() method might query each configured exchange via ExchangeAPI.list_symbols() and filter by criteria (e.g., USD/USDT quote, top N by volume, not blacklisted).
+•	If mode = "static", it will load a predefined list from the config (which might be curated by the user).
+•	The result is a list of SymbolMeta objects that will be scanned.
+
+
+Data Fetching: For each symbol in the universe:
+
+•	fetch_ohlcv retrieves historical bars for the timeframe of interest (e.g., daily). We typically fetch up to the latest completed candle. If using Postgres, these bars might be pre-populated by a separate ingestion process. If not available, the repository could fetch from exchange API then optionally store them.
+•	fetch_derivatives_metrics retrieves funding and open interest data if applicable. For example, it might query a funding_rates table in Postgres or call the exchange’s API for the last funding interval, and likewise for OI. We handle missing data gracefully: if symbol.is_perpetual is False or an API doesn’t provide OI, this returns an empty list or None. The feature calculation logic will interpret that as lack of data and avoid penalizing the symbol for it.
+
+
+Market Health Computation: compute_market_health will likely:
+
+•	Fetch the latest Bitcoin bar (or trend) from recent_bars (the dictionary of recent bars for all symbols, which would include BTC if listed) or directly query the DB for BTC’s trend indicators.
+•	Calculate btc_trend (for instance, a simple measure: is BTC above its 200-day MA, or a more sophisticated trend score for BTC).
+•	Calculate breadth as the percentage of symbols in the universe that meet a certain criterion (e.g., close > 50-day MA, or trend score > 50). This gives an idea of how many assets are in an uptrend.
+•	Determine regime using rules from config. For example:
+
+◦	If BTC is in a strong uptrend and breadth is high (many assets rising), mark regime = “bull”.
+◦	If BTC is below long-term MA and most alts are weak, regime = “bear”.
+◦	Otherwise regime = “sideways”.
+•	
+•	This function encapsulates those calculations, possibly using some thresholds from config (like BTC MA periods, breadth thresholds). The MarketHealth result is used to adjust scoring (through weights) and to include in the end-of-day report.
+
+
+Repository vs Direct API: The architecture allows flexibility:
+
+•	In production, you might maintain a Postgres database with all required data updated continuously (through separate ingestion or as part of the scanning run). The repository would primarily query that DB (fast and consistent).
+•	If the DB is missing some data (or for initial setup), the repository can fall back to ExchangeAPI calls. This might also be controlled by config (e.g., config.data.fetch_missing = True).
+•	For testing or quick setups, a simpler CSVRepository could read OHLCV data from local files, proving the benefit of the repository abstraction (the rest of the code doesn’t care where data comes from).
+
+
+Data Write/Logging: The repository also defines save_scores, save_signals, and save_report:
+
+•	These methods will persist the results of each scan. For example, save_scores could write the ScoreBundle for each symbol into a scores table, along with a date. save_signals could log each pattern trigger event (symbol, time, pattern type, scores) into a signals table or send them to an external log.
+•	Keeping a historical record in Postgres allows validating the model later and analyzing how signals performed (the backtest module can query these tables).
+•	Logs and errors could also be stored or printed as needed (for example, using Python’s logging library with handlers for console and file/DB).
+
+
+In summary, the Data Layer provides a clean separation: the rest of the system calls repository.discover_universe(), repository.fetch_ohlcv(...), etc., and doesn’t worry about whether the data came from a local cache, Postgres, or an API. This makes the system robust to changes in data source or asset class.
+
+
+3. Feature & Indicator Modules
+
+
+The Features modules compute various technical indicators and statistics needed for scoring. Each category of features (Trend, Volatility, Volume, Relative Strength, Positioning) has its own module. This separation makes the code easier to maintain and allows independent testing of each feature set.
+
+We provide function signatures and docstrings for representative features in each category. All these functions should use parameters from the config (passed in or accessed via a config object) rather than hard-coding values like periods or thresholds. Missing data (e.g., no derivatives metrics) should be handled gracefully by returning neutral values or None.
+
+
+Trend Features (
+features/trend.py
+)
+
+
+Trend features aim to quantify the direction and strength of the price trend. Key features include moving average alignment, moving average slopes, trend persistence, and momentum indicators like ADX. Example function definitions:
+# src/features/trend.py
+import numpy as np
+from typing import List
+from data.models import Bar
+
+def compute_ma_alignment(bars: List[Bar], short_period: int, long_period: int) -> float:
+    """Check if short-period MA is above long-period MA (bullish alignment).
+    Returns 1.0 if bullishly aligned, -1.0 if bearishly aligned, or 0.0 if overlapping."""
+    # Calculate moving averages (e.g., using closing prices)
+    # short_ma = average of last `short_period` closes
+    # long_ma = average of last `long_period` closes
+    # return 1.0 if short_ma > long_ma, -1.0 if short_ma < long_ma, else 0.0
+    ...
+
+def compute_ma_slope(bars: List[Bar], period: int) -> float:
+    """Compute the slope of the moving average over the given period.
+    Returns a numeric value (e.g., difference between latest MA and MA of one period ago, or a percent change)."""
+    # Compute MA for today and yesterday and take difference or percentage change.
+    ...
+
+def compute_adx_persistence(bars: List[Bar], window: int, threshold: float) -> float:
+    """Calculate the proportion of the last `window` bars where ADX >= threshold (strong trend).
+    Requires computing ADX indicator values for those bars.
+    Returns a value between 0.0 and 1.0 indicating trend consistency."""
+    # e.g., if in last 20 days, ADX was >= threshold in 15 days, return 0.75
+    ...
+
+def compute_distance_from_ma(bars: List[Bar], ma_period: int) -> float:
+    """Compute how far the last closing price is from its MA of length `ma_period`, as a percentage of price.
+    For example, (close - MA) / MA * 100."""
+    ...
+
+def compute_trend_persistence(bars: List[Bar], lookback: int) -> float:
+    """Estimate trend persistence, e.g., fraction of last `lookback` days that closed above their previous close (up days vs down days),
+    or days above a certain moving average.
+    Returns 0.0 to 1.0 (higher means more persistent uptrend)."""
+    ...
+
+•	MA Alignment: We typically choose a short-period MA (e.g., 20-day EMA) and a longer-period MA (e.g., 50-day or 200-day). If the short MA is consistently above the long MA, it indicates a bullish alignment (we might encode as +1). Bearish alignment (short below long) could be -1. This could feed into the trend score as a positive or negative contribution. (In scoring, a strong bullish alignment would yield a high trend score, whereas bearish alignment would yield a low trend score.)
+•	MA Slope: Measures whether the moving average itself is rising or falling. For example, we can compare today’s 50-day MA vs last week’s 50-day MA to gauge slope. A positive slope indicates an uptrend strengthening. We might return the actual slope or percent change, which can be normalized for scoring.
+•	ADX Persistence: ADX (Average Directional Index) measures trend strength regardless of direction. This feature looks at how consistently ADX stays above a threshold (say 25) in recent periods. A high value (near 1.0) means the asset has been in a strong trend for most of the lookback period. This helps identify trending vs choppy behavior.
+•	Distance from MA: This indicates how extended the price is relative to a moving average (commonly the 50-day MA). For instance, if price is 20% above its 50-day MA, it might suggest an overextended condition (which could temper the trend score or classify the setup as “extended”). This feature could be used to penalize very overextended moves or to identify pullback opportunities (e.g., when distance is near 0 or negative for a mean reversion entry).
+•	Trend Persistence: A simple proxy could be the proportion of recent days that closed higher than they opened (or higher close vs previous close), indicating persistent buying. Another proxy: number of consecutive higher highs/higher lows. These give a sense of whether the trend has been steady. A high persistence (close to 1) means the asset has been consistently trending up day after day.
+
+
+All these raw features will later be combined or scaled into a 0-100 Trend Score. The functions above should handle edge cases (e.g., if not enough data points, return 0 or neutral values).
+
+
+Volatility Features (
+features/volatility.py
+)
+
+
+Volatility features measure how much price is moving or compressing. These help identify squeeze setups and gauge if an asset is in a low-volatility base or a high-volatility state. Example functions:
+# src/features/volatility.py
+from typing import List
+from data.models import Bar
+
+def compute_bb_width_percent(bars: List[Bar], period: int = 20, std_dev: float = 2.0) -> float:
+    """Compute the current Bollinger Band width as a percentage of price.
+    Returns (upper_band - lower_band) / middle_band * 100 for the last period."""
+    # Calculate Bollinger Bands for the last `period` bars (mean +/- std_dev * std).
+    # Then compute width_percent = (upper - lower) / middle * 100 for the latest bar.
+    ...
+
+def compute_atr_percent(bars: List[Bar], atr_period: int = 14) -> float:
+    """Compute Average True Range (ATR) as a percentage of the current price.
+    ATR% = (ATR_value / last_close) * 100."""
+    # Compute ATR over atr_period and express as percent of last close.
+    ...
+
+def detect_volatility_contraction(bars: List[Bar], lookback: int = 60) -> float:
+    """Detect volatility contraction pattern (VCP).
+    Returns a score or ratio indicating volatility contraction over the last `lookback` bars.
+    E.g., compare recent ATR or high-low ranges in successive swings, or ratio of recent volatility to earlier volatility."""
+    # e.g., find highest volatility in lookback and current volatility; return current_vol / max_vol (lower means more contraction).
+    ...
+
+def compute_volatility_percentile(bars: List[Bar], window: int = 252) -> float:
+    """Compute the percentile rank of the current volatility (e.g., ATR or BB width) compared to last `window` bars.
+    Returns a value between 0.0 and 1.0 (e.g., 0.05 means current vol is in the 5th percentile = very low)."""
+    # Gather volatility measure (say ATR% or BB width) for each bar in window, compute percentile of latest value.
+    ...
+
+•	Bollinger Band Width %: This measures the width of Bollinger Bands relative to the middle band (which is a moving average). Narrow bands (low % width) indicate low volatility; wide bands indicate high volatility. We express it as a percentage of the mid-band to normalize across price levels. This is useful for identifying squeeze conditions (very low BB width percentile).
+•	ATR %: ATR (Average True Range) gives absolute volatility in price terms. By dividing by the current price, we get a percentage move expected in a day. This helps compare volatility across assets and over time. A lower ATR% means tighter trading range (potentially coiled for a move), whereas a very high ATR% might indicate a recent explosive move or high risk.
+•	Volatility Contraction (VCP): A more advanced feature that checks if volatility has been shrinking in successive waves. One way is to identify swing highs/lows and measure each pullback’s depth, ensuring each is smaller than the last (a hallmark of a VCP). Another simpler proxy: take the max volatility (ATR or BB width) in the last N bars vs current volatility; a ratio significantly less than 1 indicates contraction. This function might output a score or a boolean flag if a classic VCP setup is detected. (For example, if volatility has dropped in stages and current volatility is at multi-month lows, return a high score indicating a tight consolidation.)
+•	Volatility Percentile: This computes how the current volatility compares historically. For example, if the current 20-day ATR is in the 5th percentile of the last 1-year data, that means volatility is extremely low relative to its own history. We might use this percentile directly to inform the Volatility Score (low percentile = high score for a breakout setup). Conversely, if current vol is 90th percentile (very high), that might indicate an already volatile/extended condition (which might translate to a lower volatility component score in our model).
+
+
+Missing data is usually not an issue for price-based features (we assume OHLCV is available for all symbols). However, ensure to handle edge cases like not enough history to compute a 252-day percentile (in which case, maybe use what’s available or default to 0.5).
+
+
+Volume Features (
+features/volume.py
+)
+
+
+Volume features assess how trading volume compares to historical norms and whether there is evidence of accumulation (increased volume on up-moves) or sudden interest. Example functions:
+# src/features/volume.py
+from typing import List
+from data.models import Bar
+
+def compute_rvol(bars: List[Bar], lookback: int = 20) -> float:
+    """Compute Relative Volume (RVOL) of the latest bar compared to the past `lookback`.
+    Returns a ratio: latest volume / (average volume of lookback period)."""
+    # Calculate average volume over lookback excluding latest bar, then ratio.
+    ...
+
+def compute_obv_slope(bars: List[Bar], window: int = 10) -> float:
+    """Compute the slope of On-Balance Volume (OBV) over the last `window` bars.
+    OBV is accumulated volume adding/subtracting volume based on price direction.
+    Returns a value (positive for upward sloping OBV, negative for downward)."""
+    # Compute OBV series, then do linear regression or difference over the window to determine slope.
+    ...
+
+def detect_accumulation(bars: List[Bar], window: int = 15) -> bool:
+    """Detect accumulation pattern in volume.
+    Returns True if higher-than-average volume occurs on upward price moves consistently in the last `window` bars.
+    E.g., checks if up-days have significantly larger volume than down-days."""
+    # For each bar in window, check if close>open (up-day) and volume > avg_volume, count vs down-days.
+    # If up-volume dominance is strong, return True.
+    ...
+
+def compute_volume_shock_score(bars: List[Bar], window: int = 60) -> float:
+    """Score volume spikes: compare the latest volume to the distribution over `window` bars.
+    Returns a score 0-100 indicating percentile of the latest volume (100 = highest volume in window)."""
+    # e.g., rank latest volume among past window volumes, and scale to 0-100.
+    ...
+
+•	Relative Volume (RVOL): A simple but important feature: how today’s volume compares to typical volume. An RVOL of 3.0 means today traded 3× the average volume of the past N days – a potential sign of unusual activity (often accompanying breakouts). We will use RVOL in both scoring (Volume Score) and pattern confirmation (requiring RVOL above a threshold for a breakout signal).
+•	OBV Slope: OBV (On-Balance Volume) accumulates volume on up days and subtracts on down days, serving as a running total that can reveal if volume is flowing in or out. The slope of OBV over a short window can indicate who’s in control. A strongly positive OBV slope means volume is steadily flowing in (bullish). A negative slope indicates distribution. We can scale this slope or even convert it to a percentile for scoring.
+•	Accumulation Detection: A qualitative feature that checks if volume patterns indicate accumulation. For example, in a healthy base, you often see higher volume on days when price rises, and lower volume on pullback days. This function might implement a heuristic: count how many up-days had volume above some threshold vs down-days with high volume. If the majority of high-volume days correspond to price increases, that’s accumulation (bullish). This could return a boolean or be translated to a score contribution.
+•	Volume Shock Score: This captures one-time volume spikes. We look at the latest bar’s volume relative to the last few months. If it’s the highest in 60 days, that’s significant (score ~100). If it’s median, score ~50. This helps flag if a breakout is accompanied by a volume surge. In scoring, we might give extra points for a high volume spike, but we might also use it as a trigger condition in patterns (e.g., don’t call something a confirmed breakout unless volume spike score is above some percentile).
+
+
+Volume data is available for all symbols (assuming all have trading volume). Edge cases like a newly listed asset with short history should be handled (e.g., if lookback > available data, compute with what’s available or default to neutral RVOL=1).
+
+
+Relative Strength Features (
+features/relative_strength.py
+)
+
+
+Relative Strength (RS) features compare each asset’s performance to others and to benchmarks (like BTC). The idea is to find leaders (high RS) vs laggards. We often measure RS over multiple time frames. Example functions:
+# src/features/relative_strength.py
+from typing import Dict, List
+from data.models import Bar, SymbolMeta
+
+def compute_period_return(bars: List[Bar], period: int) -> float:
+    """Compute percentage return over the last `period` bars (e.g., 20 bars ~ 1 month if daily).
+    Returns (last_close / close_{period} - 1) * 100."""
+    ...
+
+def compute_relative_performance(symbol_return: float, benchmark_return: float) -> float:
+    """Compute performance of symbol relative to a benchmark (e.g., BTC).
+    Returns the difference in returns (symbol - benchmark) in percentage points."""
+    # e.g., if symbol +10%, BTC +2%, relative = +8%.
+    ...
+
+def compute_return_percentiles(symbol: SymbolMeta, returns_1M: Dict[SymbolMeta, float], returns_3M: Dict[SymbolMeta, float]) -> Dict[str, float]:
+    """Compute percentile ranks of this symbol's 1M and 3M returns vs the universe.
+    returns_1M and returns_3M are dicts of SymbolMeta->return% for all symbols.
+    Returns {'pct_rank_1m': X, 'pct_rank_3m': Y} as values between 0 and 100."""
+    # Rank the symbol's returns within the list of all returns and convert to percentile (0-100).
+    ...
+
+def smooth_relative_strength(rs_history: List[float], smoothing_window: int = 3) -> float:
+    """Optional: smooth RS values over time (e.g., take a short moving average of recent RS scores to avoid one-day noise).
+    Returns a smoothed RS score."""
+    ...
+
+•	Period Return: A utility to calculate returns for a given period (say 1 month = ~20 trading days, 3 months = ~60 trading days). This will be used for each symbol and also for the benchmark (BTC or an index). We’ll likely call this for 1M and 3M periods for each symbol.
+•	Relative Performance vs Benchmark: A simple comparison of symbol’s return minus BTC’s return over the same period. If positive, the symbol outperformed BTC in that period. This can be a feature or directly integrated: for example, one could require RS > 0 (outperformance) as part of a strong setup criterion.
+•	Return Percentiles (Rank in Universe): Here we take the list of 1M returns for all symbols (including BTC or excluding depending on use) and compute where our symbol stands. If pct_rank_1m = 90, it means the symbol’s 1-month return is higher than 90% of the universe, which is excellent RS. We do similarly for 3M. These percentile ranks (0-100) will feed into the RS Score directly or via a weighted combination. Implementation: sort all returns, find rank of current symbol, convert rank to percentile.
+•	Smooth Relative Strength: RS can be noisy day-to-day. Optionally, we can smooth it by averaging recent values (for example, average the last 3 days of percentile ranks to get a more stable score). This prevents one-off moves from overly swinging the RS score. This is optional and controlled by config (e.g., config.features.rs.smoothing_days). If smoothing is not desired, we just use the current values.
+
+
+Handling missing data: RS requires that we have returns for all symbols in the universe for the given periods. If some symbol is new (less than 3 months trading), its 3M return might not be available. In such cases, we can either:
+
+•	Exclude that symbol from RS ranking for that timeframe, or
+•	Assume a neutral performance (0% or use available shorter period extrapolated).
+The implementation should be careful to avoid crashing if data is incomplete. Typically, if a symbol is missing 3M history, we might give it an RS percentile of 50 by default for 3M (neutral), or base it only on 1M. These decisions can be configured in the config.yaml (e.g., how to handle partial history).
+
+
+
+Positioning / Sentiment Features (
+features/positioning.py
+)
+
+
+Positioning features use derivative market data to gauge trader sentiment and positioning imbalances. These include funding rates, open interest changes, etc. Not all symbols have these (only perpetual swaps/derivatives), so the feature module should handle missing data by either returning neutral values or skipping. Example functions:
+# src/features/positioning.py
+from typing import List
+from data.models import DerivativesMetrics, SymbolMeta
+
+def compute_funding_zscore(funding_rates: List[float]) -> Optional[float]:
+    """Compute the z-score of the latest funding rate relative to its history.
+    Returns number of std devs the latest funding is from the mean (high positive = expensive longs, high negative = shorts crowded).
+    If not enough data or no funding, return None."""
+    # Compute mean and std of funding_rates list, z = (last - mean)/std
+    ...
+
+def compute_open_interest_change(metrics: List[DerivativesMetrics], period: int = 1) -> Optional[float]:
+    """Compute percentage change in open interest over the last `period` intervals (e.g., last 24h if period=1 for daily data).
+    Returns (latest_OI - prev_OI)/prev_OI * 100, or None if data not available."""
+    ...
+
+def compute_positioning_features(symbol: SymbolMeta, metrics: List[DerivativesMetrics]) -> dict:
+    """Compute a dictionary of positioning features (funding rate, funding z-score, OI change, etc.) for the given symbol.
+    If symbol is not a perpetual or metrics not provided, returns an empty dict or neutral defaults."""
+    features = {}
+    if not symbol.is_perpetual or not metrics:
+        return features  # no positioning features
+    # Assuming metrics list is sorted by time and includes recent data points
+    latest = metrics[-1]
+    features['funding_rate'] = latest.funding_rate
+    # funding z-score using a window of last N funding rates:
+    fund_hist = [m.funding_rate for m in metrics if m.funding_rate is not None]
+    features['funding_zscore'] = compute_funding_zscore(fund_hist) if fund_hist else None
+    # OI 24h change:
+    if len(metrics) >= 2 and metrics[-2].open_interest:
+        prev_oi = metrics[-2].open_interest
+        curr_oi = latest.open_interest
+        features['oi_change_pct'] = ((curr_oi - prev_oi) / prev_oi * 100) if (curr_oi and prev_oi) else None
+    else:
+        features['oi_change_pct'] = None
+    return features
+
+•	Funding Rate Z-Score: Funding rate is the fee paid between long and short traders on perpetual swaps. A high positive funding means longs are paying shorts (market likely overly long); a high negative funding means shorts are paying longs (could indicate an overly bearish sentiment). We take a history (e.g., last 7 days of funding every 8 hours, or last N funding points) and compute the z-score of the latest value. If z-score >> 0 (e.g., +3), funding is extremely high relative to history (potentially a bearish signal as it may revert or precede long unwinding). If z-score << 0 (e.g., -2), funding is very low or negative (bullish contrarian signal, as shorts are crowded). If the symbol has no funding (spot market), we return None and the scoring will ignore this.
+•	Open Interest (OI) Change: Measures the change in OI over a recent period (commonly 24 hours or one funding interval, depending on data frequency). A spike in OI could indicate money flowing in (if price is flat, that could mean positions building up for a move; if price is rising with OI up, longs adding; if price rising and OI dropping, shorts closing, etc.). We typically use OI % change: (current_OI - prev_OI) / prev_OI * 100. This feature may be used to augment the positioning score. For example, a large increase in OI alongside a price rise might be bullish (new longs entering on breakout), but a large increase while price falls might indicate shorts piling in (which could be bullish if they later get squeezed, or bearish if confirming a trend—interpretation can vary). The system might treat moderate OI increases as positive (interest in the asset) up to a point, but extremely high OI + high funding might be a caution sign.
+•	Positioning Feature Aggregator: In compute_positioning_features, we combine various metrics for convenience. It first checks if the symbol is a derivative; if not, it returns an empty dict (meaning no positioning data). If yes, it computes funding rate (raw), funding z-score, and OI 24h change. We could also include other metrics if available (e.g., long/short ratio, liquidations data if we had it, etc.). All these will feed into the Positioning Score. Any None or missing values will be handled in scoring by treating them as neutral contributions (and reducing confidence).
+
+
+Graceful Handling of Missing Data: Many altcoins might not have a perpetual future listing, or some exchanges might not provide OI. The design ensures that:
+
+•	compute_positioning_features simply returns an empty dict or None for those symbols.
+•	The Positioning Score function (in scoring/positioning_score.py) will recognize that and either skip that component (e.g., not count it toward confluence score) or assign a neutral score (like 50 out of 100) meaning “no data, so no strong sentiment bias”.
+•	The ScoreBundle.confidence can be lowered if a component is missing, but a good setup can still be identified based on other factors. Essentially, missing positioning data should neither falsely penalize nor reward a symbol; it’s just omitted from consideration.
+
+
+In summary, the feature modules prepare all necessary inputs (indicators and stats). These raw values may be used directly for pattern logic or fed into the scoring functions to produce standardized 0-100 scores.
+
+
+4. Scoring System (Component Scores & Confluence Score)
+
+
+The scoring system transforms the raw features into standardized scores (0–100) for each category, and then computes a composite Confluence Score. Each component score uses a formula or heuristic to map the feature values into a 0-100 scale (with 100 being most bullish for that factor). All thresholds, weightings, and formula parameters are loaded from config.yaml – nothing is hard-coded, allowing easy tuning. The scores are then combined with different weights depending on the market regime (bull, bear, sideways), which is determined by the MarketHealth analysis.
+
+We outline pseudocode for each component score and the confluence score:
+# src/scoring/trend_score.py
+def compute_trend_score(features: dict, config: dict) -> float:
+    """
+    Compute trend score (0-100) based on trend features.
+    `features` might include: ma_alignment (±1), ma_slope, adx_persistence (0-1), ma_distance %, trend_persistence (0-1).
+    """
+    score = 0.0
+    # Example contributions (all weights/thresholds from config):
+    if features.get('ma_alignment') is not None:
+        # If bullish alignment, add weight; if bearish, subtract or zero out.
+        if features['ma_alignment'] > 0:
+            score += config['trend']['ma_alignment_points']  # e.g., +20 points for bullish alignment
+        elif features['ma_alignment'] < 0:
+            score += 0  # or subtract points if bearish, depending on scoring philosophy
+    if features.get('ma_slope') is not None:
+        # Scale MA slope (e.g., percent per day) to 0- points and cap at some max
+        slope = features['ma_slope']
+        score += min(slope * config['trend']['ma_slope_factor'], config['trend']['ma_slope_max'])
+    if features.get('adx_persistence') is not None:
+        # If ADX persistence is e.g. 0.8 (80% of days trending), give proportional points
+        score += features['adx_persistence'] * config['trend']['adx_persistence_weight']  # weight might be 30 points max
+    if features.get('ma_distance') is not None:
+        # If price is too extended above MA, maybe reduce the score
+        dist = features['ma_distance']  # e.g., 20 means +20%
+        if dist > config['trend']['max_desired_distance_pct']:
+            score -= (dist - config['trend']['max_desired_distance_pct']) * config['trend']['distance_penalty_factor']
+    # trend_persistence can add points for consistent up days
+    if features.get('trend_persistence') is not None:
+        score += features['trend_persistence'] * config['trend']['persistence_weight']
+    # Normalize or clamp the score between 0 and 100:
+    score = max(0, min(score, 100))
+    return score
+The above pseudocode shows how various features contribute. All numeric values like ma_alignment_points, ma_slope_factor, etc., come from the config file so they can be adjusted. For example, one configuration might give a heavy weight to MA alignment and ADX, whereas another might rely more on persistence.
+
+Likewise, we would implement similar functions for other scores:
+# src/scoring/volume_score.py
+def compute_volume_score(features: dict, config: dict) -> float:
+    """
+    Compute volume score (0-100) based on volume features.
+    features may include: rvol, obv_slope, accumulation (bool or score), volume_spike_percentile.
+    """
+    score = 0.0
+    # For example:
+    if features.get('rvol') is not None:
+        # Cap RVOL influence to avoid extreme numbers
+        rvol = features['rvol']
+        if rvol >= config['volume']['rvol_threshold']:
+            score += config['volume']['rvol_points_max']  # give full points if volume is beyond threshold (e.g., >2x)
+        else:
+            # Scale linearly: if threshold is 2x for full points, then if 1.5x give 0.5 of points, etc.
+            score += (rvol - 1) / (config['volume']['rvol_threshold'] - 1) * config['volume']['rvol_points_max']
+    if features.get('obv_slope') is not None:
+        # OBV slope could be positive or negative. We convert it to points.
+        # For simplicity, if OBV slope > 0, add some points, if <0, subtract or zero.
+        if features['obv_slope'] > 0:
+            score += config['volume']['obv_positive_points']
+        else:
+            score += config['volume']['obv_negative_points']  # this might be zero or a small penalty
+    if features.get('accumulation') is True:
+        score += config['volume']['accumulation_points']
+    if features.get('volume_spike_pct') is not None:
+        # volume_spike_pct is e.g. percentile (0-100). If it's very high, it indicates recent unusual volume.
+        if features['volume_spike_pct'] > 90:
+            score += config['volume']['volume_spike_bonus']  # extra points for big recent spike
+    return max(0, min(score, 100))
+Here we see:
+
+•	If RVOL is high, we grant a lot of points to volume score. The config might say if RVOL >= 2, then up to e.g. 30 points for volume.
+•	OBV slope positive might give, say, +10 points (configurable), negative might give 0 or -5.
+•	If accumulation pattern detected, add a fixed bonus (meaning smart money buying).
+•	If a major volume spike occurred (like 99th percentile volume day), add a bonus as well, since that often precedes or confirms a breakout move.
+
+
+We would ensure the score is capped at [0,100]. If there’s no significant volume action, volume score might remain low.
+# src/scoring/volatility_score.py
+def compute_volatility_score(features: dict, config: dict) -> float:
+    """
+    Compute volatility score (0-100). Higher score here often means *favorable* low-volatility base.
+    features: bb_width_pct, atr_pct, vol_percentile, etc.
+    """
+    score = 0.0
+    if features.get('vol_percentile') is not None:
+        # If current volatility is low (percentile small), that's good for potential breakouts.
+        # We can define volatility_score = (1 - vol_percentile) * 100
+        vol_pct = features['vol_percentile']  # 0.0 to 1.0
+        score += (1 - vol_pct) * 100 * config['volatility']['vol_percentile_weight']
+    if features.get('vcp_score') is not None:
+        # If a volatility contraction pattern is detected, boost the score.
+        score += features['vcp_score'] * config['volatility']['vcp_weight']  # vcp_score might be normalized 0-1
+    # Potentially penalize if volatility is extremely high:
+    if features.get('atr_percent') is not None:
+        atr_pct = features['atr_percent']
+        if atr_pct > config['volatility']['atr_extreme_pct']:
+            score -= (atr_pct - config['volatility']['atr_extreme_pct']) * config['volatility']['atr_penalty_factor']
+    # clamp 0-100
+    return max(0, min(score, 100))
+Interpreting this:
+
+•	We transform volatility percentile (0 to 1) into a score: if vol percentile is low (e.g. 0.10 or 10th percentile), then (1 - 0.1)*100 = 90, meaning a high score – the asset is in a rare low-volatility state (which is usually good for a breakout setup). The vol_percentile_weight in config might be 1.0 for full effect or less to scale it.
+•	If our VCP detection returned a score (say 0 to 1 indicating degree of contraction), we add points proportionally. If a textbook VCP = 1.0, maybe give a fixed large boost via weight.
+•	If ATR% is extremely high (maybe above some threshold like 10% daily moves), we subtract points because the asset might be too volatile (already flying around, maybe after a big move or just inherently risky). This penalty threshold and amount are tunable.
+
+# src/scoring/rs_score.py
+def compute_relative_strength_score(features: dict, config: dict) -> float:
+    """
+    Compute relative strength score (0-100) from RS features.
+    features: pct_rank_1m, pct_rank_3m (0-100), maybe other durations or smoothed RS.
+    """
+    # A simple approach: weighted average of 1M and 3M percentile ranks.
+    w1 = config['relative_strength']['weight_1m']
+    w3 = config['relative_strength']['weight_3m']
+    rank1 = features.get('pct_rank_1m', 50)  # default to 50 if missing
+    rank3 = features.get('pct_rank_3m', 50)
+    raw_score = (rank1 * w1 + rank3 * w3) / (w1 + w3)
+    # Optionally apply smoothing: if config says to smooth RS, perhaps average with previous day or incorporate a 5-day average of ranks.
+    if config['relative_strength'].get('smooth_factor'):
+        # If smoothing is desired and perhaps features provided 'smoothed_rs'
+        raw_score = features.get('smoothed_rs', raw_score)
+    # Ensure within 0-100
+    return max(0, min(raw_score, 100))
+For RS Score:
+
+•	We take the percentile ranks (0-100) as computed in features. If a symbol is top 10% in both 1M and 3M, those are say 90 and 90, which yields 90. If one is high and one lower, the weighted average captures recent vs longer-term performance.
+•	We might weight recent performance more (e.g., w1 = 0.4, w3 = 0.6 from config).
+•	The result is already 0-100 naturally, but we clamp to be safe.
+•	If smoothing is turned on, we could use a smoothed_rs (which might be a short MA of daily RS scores). That could be passed in features or recomputed here using an internal state or recent data from DB. The code above assumes if smoothing is configured, perhaps features contains a precomputed smoothed value.
+
+# src/scoring/positioning_score.py
+def compute_positioning_score(features: dict, config: dict) -> Optional[float]:
+    """
+    Compute positioning/sentiment score (0-100) based on funding and OI data.
+    If no positioning data (features empty), return None.
+    """
+    if not features:
+        return None  # no data to score
+    score = 50.0  # start at neutral 50
+    # Funding rate influence:
+    if features.get('funding_rate') is not None:
+        fr = features['funding_rate']
+        # e.g., if funding is negative (shorts pay longs), that's bullish -> add points up to a cap
+        if fr < 0:
+            score += min(abs(fr) * config['positioning']['funding_negative_factor'], config['positioning']['funding_max_bonus'])
+        else:
+            # positive funding (longs pay shorts) can be a bearish sign if too high
+            score -= min(fr * config['positioning']['funding_positive_factor'], config['positioning']['funding_max_penalty'])
+    if features.get('funding_zscore') is not None:
+        z = features['funding_zscore']
+        # extreme positive z (overheated longs) -> negative impact, extreme negative z -> positive impact
+        if z > 0:
+            score -= min(z * config['positioning']['zscore_penalty_factor'], config['positioning']['zscore_max_penalty'])
+        elif z < 0:
+            score += min(abs(z) * config['positioning']['zscore_bonus_factor'], config['positioning']['zscore_max_bonus'])
+    if features.get('oi_change_pct') is not None:
+        oi_chg = features['oi_change_pct']
+        # If OI jumped significantly with price up, could be bullish (new longs).
+        # If OI jumped and price down, could be new shorts (maybe bullish contrarian if extreme).
+        # Simplify: any large rise in OI gets some points (interest increase).
+        if oi_chg is not None:
+            if oi_chg > config['positioning']['oi_positive_threshold']:
+                score += config['positioning']['oi_positive_points']  # e.g., +5 if OI > +10%
+            elif oi_chg < config['positioning']['oi_negative_threshold']:
+                score -= config['positioning']['oi_negative_points']  # e.g., -5 if OI drop > 10%
+    # Clamp 0-100
+    return max(0, min(score, 100))
+Interpretation:
+
+•	We start positioning score at 50 (neutral baseline). This way, if there are no extreme signals, positioning stays neutral.
+•	Negative funding is treated as bullish (shorts are paying longs, implying many shorts) – we add points. The funding_negative_factor could be, say, 1000 so that a -0.01 (which is -1%/8h) adds 10 points, for example. We cap it at funding_max_bonus to avoid absurd values.
+•	Positive funding is bearish if high – we subtract points similarly scaled. If funding is mild (like 0.01 or 0.02), maybe small penalty; if extremely high (0.1, meaning 0.1% per 8h which is huge), penalize more.
+•	Funding z-score similarly adjusts: if current funding is unusually high relative to history (zscore positive), subtract points; if unusually low/negative (zscore negative), add points. This somewhat overlaps with raw funding, but z-score accounts for different baseline per asset.
+•	OI change: as a simplification, any large increase in OI yields a few points (sign of interest). A large drop in OI might reduce points (people closing positions). In practice, one might refine this with context (e.g., check price movement too), but here we keep it straightforward.
+•	The final score is clamped 0-100. If a symbol has no positioning data (features empty), we return None to indicate “not applicable”.
+
+
+Combining into Confluence Score: The Confluence Score aggregates all component scores into a single 0-100 number representing overall technical strength of the setup. We do this by weighting each component according to the current market regime (and possibly other config preferences). The weights for bull/bear/sideways regimes are defined in config (e.g., in a section scoring.weights).
+# src/scoring/confluence.py
+def compute_confluence_score(score_bundle: ScoreBundle, regime: str, config: dict) -> tuple[float, float]:
+    """
+    Compute the overall Confluence Score (0-100) as a weighted combination of component scores.
+    Also compute a confidence metric based on data completeness.
+    Returns (confluence_score, confidence).
+    """
+    weights = config['scoring']['weights'][regime]    # e.g., {'trend':0.3, 'volume':0.2, ...} for the regime
+    total_weight = 0.0
+    weighted_sum = 0.0
+    available_weight = 0.0
+    # For each component, use its weight if score is available.
+    for component in ['trend', 'volume', 'volatility', 'relative_strength', 'positioning']:
+        comp_score = getattr(score_bundle, component)
+        w = weights.get(component, 0)
+        if comp_score is not None:
+            weighted_sum += comp_score * w
+            available_weight += w
+        total_weight += w
+    if available_weight == 0:
+        return 0.0, 0.0  # no data case (should not happen if at least price data exists)
+    # Scale the score to 0-100 by using available_weight (so missing component doesn't dilute score):
+    confluence_score = (weighted_sum / available_weight)
+    # Compute confidence as fraction of total weight that was available:
+    confidence = available_weight / total_weight
+    return confluence_score, confidence
+In this pseudocode:
+
+•	We fetch the weight for each component for the given regime. For example, in a bull market, config might assign higher weight to Trend and RS, but in a bear market, maybe weight to Volume and Positioning (if looking for short-squeeze plays) is higher. The sum of weights can be normalized or not; here we effectively normalize by using available_weight.
+•	We iterate through each component. If the score_bundle has that score (not None), we add score * weight to weighted_sum and also add the weight to available_weight. If the score is None (missing, e.g., no positioning data), we skip it but still count its weight in total_weight.
+•	After summing, confluence_score is computed as weighted_sum / available_weight. This means we average the available components only, so missing data doesn’t directly lower the score. (Alternatively, one could use total_weight to always include all components, treating missing as zero, but that would punish symbols missing a component. Our method treats missing as neutral – effectively the score is an average of what is present).
+•	confidence is available_weight / total_weight. This yields a number ≤ 1 (or ≤100% if expressed in percent). If all components are present, available_weight == total_weight, so confidence = 1 (100%). If one component (say positioning) was missing and its weight was, e.g., 0.1 out of total 1.0, then confidence = 0.9. We can use this confidence to inform how much we trust the Confluence Score. For example, in ranking or alerts, we might flag low-confidence scores (because perhaps those are spot markets with no positioning data – still fine, just note that fewer factors are in play).
+
+
+Score Classification (Example): Based on Confluence Score and maybe specific component thresholds, we can classify setups for user-friendly interpretation (this is outside the core algorithm but useful for reports/alerts):
+
+•	Emerging Setup: A symbol that is shaping up but not yet confirmed. For instance, trend/RS are improving and volatility is low (confluence maybe in 60-70 range), but volume hasn’t come in yet or pattern not triggered. We might classify Confluence 60-79 as “Emerging”.
+•	Confirmed Breakout: Very high confluence (80+), with strong trend and RS scores, and perhaps volume confirmation. E.g., after a breakout move on volume, the scores will spike. We could label Confluence > 80 and volume_score > some threshold as “Confirmed Breakout”.
+•	Extended: Extremely high confluence (90+), but also perhaps a very large distance from moving average (trend feature) or high volatility now. This might indicate the move is well underway and possibly nearing exhaustion. We could classify if Confluence is high but volatility_score has dropped (i.e., volatility expanded) or trend distance is high, then call it “Extended” (meaning risk of pullback).
+•	Low Score: (0-50) might indicate no significant setup detected or a weak coin, which may be filtered out entirely from reports.
+
+
+These classifications are purely for reporting convenience. They can be defined via thresholds in config (config.scoring.classification) and are not used in calculations, only in describing the output.
+
+No Hardcoding: All numeric values mentioned (points, weights, thresholds like 80 for classification, etc.) should be present in config.yaml. For example:
+scoring:
+  trend:
+    ma_alignment_points: 20
+    ma_slope_factor: 1000
+    ma_slope_max: 20
+    adx_persistence_weight: 30
+    max_desired_distance_pct: 15
+    distance_penalty_factor: 1
+    persistence_weight: 10
+  volume:
+    rvol_threshold: 2.0
+    rvol_points_max: 30
+    obv_positive_points: 10
+    obv_negative_points: 0
+    accumulation_points: 5
+    volume_spike_bonus: 5
+  volatility:
+    vol_percentile_weight: 1.0
+    vcp_weight: 20
+    atr_extreme_pct: 10
+    atr_penalty_factor: 1
+  relative_strength:
+    weight_1m: 0.4
+    weight_3m: 0.6
+    smooth_factor: 0  # or some factor if smoothing
+  positioning:
+    funding_negative_factor: 1000
+    funding_max_bonus: 15
+    funding_positive_factor: 500
+    funding_max_penalty: 10
+    zscore_bonus_factor: 5
+    zscore_max_bonus: 10
+    zscore_penalty_factor: 5
+    zscore_max_penalty: 10
+    oi_positive_threshold: 10
+    oi_positive_points: 5
+    oi_negative_threshold: -10
+    oi_negative_points: 5
+  weights:
+    bull: {trend: 0.3, volume: 0.2, volatility: 0.2, relative_strength: 0.2, positioning: 0.1}
+    sideways: {trend: 0.2, volume: 0.2, volatility: 0.3, relative_strength: 0.2, positioning: 0.1}
+    bear: {trend: 0.1, volume: 0.2, volatility: 0.2, relative_strength: 0.1, positioning: 0.4}
+  classification:
+    emerging: 60
+    breakout: 80
+    extended: 90
+(The above is just an illustrative snippet; actual config to be given in section 9.)
+
+By keeping the scoring calculations parameterized, we can iterate on the model. For example, if we find that volatility contraction should be given more weight in sideways markets, we adjust the config, not the code. Similarly, if we extend to equities, we might reduce the weight of positioning (since no funding rates) and increase weight of volume or trend accordingly via config.
+
+
+5. Pattern Detection Modules
+
+
+Pattern detection modules scan the processed data for specific technical setups or triggers. These patterns include:
+
+•	Breakouts – price breaking above a key level with volume confirmation.
+•	Volatility Squeezes – periods of low volatility resolving into a move.
+•	Holy Grail Pullback – a strong trend (ADX high) with a pullback to a moving average (often EMA20) indicating a potential entry.
+•	RSI Divergences – price and momentum diverging, signaling a potential reversal.
+
+
+Each pattern module defines functions that look at recent data (price bars, indicator values, scores) and decide if a pattern is present. Critically, pattern signals are gated by score thresholds to reduce noise. That is, even if a chart pattern appears, we only flag it if the quantitative scores support it (e.g., relative strength is high or Confluence Score passes a minimum).
+
+We’ll outline each pattern’s detection logic and gating:
+
+
+Breakout Pattern (
+patterns/breakout.py
+)
+
+
+A breakout is typically identified by price closing above a recent resistance or pivot high, accompanied by a surge in volume. We might define the pivot as the highest high of the last N days (configurable). The volume surge can be measured by RVOL or volume percentile. Additionally, we require that the asset has strong relative strength and a decent confluence score to avoid false breakouts of weak assets.
+# src/patterns/breakout.py
+from data.models import Bar, SymbolMeta
+from scoring import ScoreBundle
+
+def detect_breakout(symbol: SymbolMeta, recent_bars: list[Bar], scores: ScoreBundle, config: dict):
+    """
+    Detects a breakout above a recent pivot high with volume confirmation.
+    Returns a Signal dict if breakout pattern is confirmed, otherwise None.
+    """
+    if len(recent_bars) < config['patterns']['breakout_lookback']:
+        return None  # not enough data
+    # Determine the pivot high (e.g., highest close or high in last N days excluding today)
+    lookback = config['patterns']['breakout_lookback']  # e.g., 20 days
+    pivot_high = max(bar.high for bar in recent_bars[-lookback-1:-1])  # highest high in past N days (excluding last bar)
+    last_bar = recent_bars[-1]
+    # Check price breakout condition:
+    if last_bar.close <= pivot_high:
+        return None  # no breakout, price not above pivot
+    # Check volume confirmation (e.g., RVOL or absolute volume vs average):
+    avg_vol = sum(bar.volume for bar in recent_bars[-lookback-1:-1]) / lookback
+    rvol = last_bar.volume / avg_vol if avg_vol > 0 else 0
+    if rvol < config['patterns']['min_rvol_for_breakout']:
+        return None  # breakout not valid without volume
+    # Gating by scores:
+    if scores.relative_strength is not None and scores.relative_strength < config['patterns']['min_rs_for_breakout']:
+        return None  # require minimum RS
+    if scores.confluence is not None and scores.confluence < config['patterns']['min_confluence_for_breakout']:
+        return None  # require overall quality
+    # If all conditions met, create a signal
+    return {
+        "symbol": symbol.symbol,
+        "exchange": symbol.exchange,
+        "pattern": "Breakout",
+        "price": last_bar.close,
+        "pivot": pivot_high,
+        "volume": last_bar.volume,
+        "rvol": round(rvol, 2),
+        "scores": scores,
+        "reason": f"Price broke above {pivot_high:.2f} with {rvol:.1f}x avg volume"
+    }
+In the pseudocode above:
+
+•	We define a breakout_lookback (say 20 days) in config to determine what constitutes the recent range.
+•	We find the highest high in that period. If the latest close is above that pivot, a breakout is happening.
+•	We then calculate RVOL (relative volume vs that period’s average). If it’s below min_rvol_for_breakout (say we require at least 1.5× average volume), we abort – we don’t consider it a real breakout if volume is weak.
+•	Score gating: we require scores.relative_strength >= min_rs_for_breakout (for example, ensure RS score >= 60 so that the asset is relatively strong; this filters out breakouts in weak coins that might fail). And scores.confluence >= min_confluence_for_breakout (ensuring overall technical context is supportive, e.g., >= 70).
+•	Only if all conditions are satisfied do we return a Signal dictionary containing details. This could be a custom class as well, but a dict is shown for simplicity. It includes the symbol, pattern name, breakout price, the pivot level it broke, volume info, and we attach the scores or at least reference them. The “reason” or description field explains why the signal triggered (useful for alerts).
+
+
+Gating by RS and Confluence ensures quality: e.g., if a random low-cap coin on low volume blips above a high, it won’t alert unless it also had high RS and high volume.
+
+
+Volatility Squeeze Pattern (
+patterns/volatility_squeeze.py
+)
+
+
+A volatility squeeze occurs when an asset’s volatility reaches very low levels (often visible as tight Bollinger Bands), then potentially starts expanding. Typically, one waits for a breakout from the tight range as confirmation. Our detection will look for extremely low volatility percentile and an initial price move.
+
+We also gate by requiring that the trend context is favorable – e.g., we prefer an uptrend (or at least not a downtrend) if we are looking to trade a squeeze upward.
+# src/patterns/volatility_squeeze.py
+from data.models import Bar
+from scoring import ScoreBundle
+
+def detect_volatility_squeeze(symbol: SymbolMeta, recent_bars: list[Bar], features: dict, scores: ScoreBundle, config: dict):
+    """
+    Detects a volatility squeeze setup.
+    Conditions:
+      - Current volatility (e.g., Bollinger Band width or ATR%) is in bottom X percentile.
+      - Price has started to move out of the tight range (e.g., last close higher than previous close or above a MA).
+      - Only trigger if broader trend is favorable.
+    Returns a Signal dict if criteria met.
+    """
+    vol_pct = features.get('vol_percentile')  # assuming features dict was computed for symbol
+    if vol_pct is None:
+        return None
+    if vol_pct > config['patterns']['squeeze_vol_percentile_max']:
+        return None  # volatility not low enough (needs to be below e.g. 0.10 or 10th percentile)
+    # Check a simple breakout of the squeeze: e.g., last close above the previous 5 bars' range
+    recent_high = max(bar.high for bar in recent_bars[-5:])
+    if recent_bars[-1].close < recent_high:
+        return None  # price hasn't broken out of the tight range yet
+    # Gate by trend context: only consider if the trend score is decent
+    if scores.trend is not None and scores.trend < config['patterns']['min_trend_for_squeeze']:
+        return None  # skip if no trend backing (we want a squeeze in a uptrending context ideally)
+    # If all conditions pass:
+    return {
+        "symbol": symbol.symbol,
+        "pattern": "Volatility Squeeze",
+        "vol_percentile": vol_pct,
+        "recent_range": recent_high,
+        "scores": scores,
+        "reason": f"Volatility at {vol_pct*100:.0f}th percentile, price breaking out of tight range"
+    }
+Here:
+
+•	squeeze_vol_percentile_max might be 0.10 (10th percentile) as a threshold. So if current volatility is higher (like 20th percentile), we don’t consider it a “squeeze” extreme enough.
+•	We check if price is starting to move: for example, take the last 5 bars (or a small multiple of the period of tightness) and get the highest high. If the latest close exceeds that, it indicates a breakout from the range.
+•	Trend gating: If the trend score is below a threshold (say we require trend score >= 60 to consider an upward resolution likely), then we skip. The rationale is we prefer squeezes that break in the direction of the prevailing trend (or at least have a positive trend context). If trend score is low (downtrend), a squeeze could break downwards, which we might not want unless we also trade shorts (the system could be extended for short signals, but let’s assume looking for bullish setups primarily).
+•	If criteria are met, return a signal with details. The reason notes low volatility percentile and that price is starting to break out.
+
+
+We might also consider RS gating here: for example, only flag a squeeze if the asset is not a complete laggard (maybe RS score above median). This can be added similarly:
+if scores.relative_strength and scores.relative_strength < config['patterns']['min_rs_for_squeeze']:
+    return None
+if such a config is provided.
+
+
+Holy Grail Pullback (
+patterns/pullback.py
+)
+
+
+The “Holy Grail” setup (named by trader Linda Raschke) is when a strong trend (high ADX) pulls back to a key moving average (often the 20-period EMA) and then resumes. Essentially, it’s a dip buy in a strong uptrend.
+
+Detection:
+
+•	ADX above a threshold (indicating a strong trend) in recent data.
+•	Price has touched or dipped slightly below the chosen moving average (say EMA20) and then shows a bounce (e.g., the last bar closed back above the EMA or had a bullish reversal candle).
+•	Gate by requiring that trend score is high (ensuring the overall trend is indeed strong).
+
+# src/patterns/pullback.py
+from data.models import Bar
+
+def detect_holy_grail_pullback(symbol: SymbolMeta, recent_bars: list[Bar], features: dict, scores: ScoreBundle, config: dict):
+    """
+    Detects a 'Holy Grail' pullback: price in strong uptrend (ADX high) pulled back to EMA20.
+    Conditions:
+      - ADX >= threshold in recent period.
+      - Price touched/near EMA20 and is now stabilizing or bouncing.
+      - Trend score (or other trend qualifier) is high.
+    """
+    # Check ADX (assuming features has 'adx_value' or use trend features directly)
+    adx_val = features.get('adx') or features.get('adx_recent_max')  # e.g., highest ADX in last N days
+    if adx_val is None or adx_val < config['patterns']['min_adx_for_pullback']:
+        return None
+    # Compute or retrieve EMA20 (we might have it in features)
+    ema20 = features.get('ema20')
+    if ema20 is None:
+        # If not precomputed, calculate EMA20 of recent_bars
+        prices = [bar.close for bar in recent_bars]
+        # (Pseudo: compute EMA20 of prices, especially the last value)
+        ema20 = ... 
+    # Check last bar relative to EMA20:
+    last_price = recent_bars[-1].close
+    prev_price = recent_bars[-2].close if len(recent_bars) > 1 else None
+    touched = (last_price <= ema20 <= (prev_price or last_price)) or abs(last_price - ema20) / ema20 < config['patterns']['ema20_tolerance']
+    if not touched:
+        return None  # price did not touch or come near the EMA20
+    # Optionally, require a positive price reaction: e.g., last bar closed green/up
+    if last_price < prev_price:
+        return None  # if the last bar is still down, no bounce yet
+    # Gate by trend score:
+    if scores.trend is not None and scores.trend < config['patterns']['min_trend_for_pullback']:
+        return None
+    return {
+        "symbol": symbol.symbol,
+        "pattern": "HolyGrail Pullback",
+        "adx": adx_val,
+        "price": last_price,
+        "ema20": ema20,
+        "scores": scores,
+        "reason": f"ADX ~{adx_val} (strong trend), pullback to EMA20 at {ema20:.2f} with bounce"
+    }
+Explanation:
+
+•	We ensure ADX (or the maximum ADX in recent days) is above min_adx_for_pullback (say 25 or 30, indicating a strong trend).
+•	We ensure the price is near the EMA20. If features.ema20 is provided (we could compute EMA20 in trend features to reuse), use that. We check if the price either exactly touched or crossed the EMA20 in the last bar or is within a small tolerance (maybe a percentage threshold from config).
+•	We also check that now there’s an upward move (optional but logical): if the last bar closed above previous (or is a bullish candle, which we simplistically check by last_price > prev_price).
+•	Trend score gating: require trend score high (e.g., ≥ some value like 70) to confirm this is indeed in an uptrend environment.
+•	If satisfied, return a signal with ADX value, price, EMA20, etc.
+
+
+This pattern helps find entries on strong trends; gating ensures we don’t do this for weak trends. If needed, one could also require RS score is high (the best pullbacks are in leaders).
+
+
+RSI Divergence (
+patterns/divergence.py
+)
+
+
+RSI divergence can signal a potential reversal:
+
+•	Bullish divergence: Price makes a lower low, but RSI makes a higher low (momentum loss in the downtrend).
+•	Bearish divergence: Price makes a higher high, but RSI a lower high (momentum waning in an uptrend).
+
+
+We detect divergences by comparing recent swing highs/lows and corresponding RSI values. For simplicity, we might use the last two lows and last two highs:
+
+•	Find the last two local minima in price and note RSI at those points.
+•	Find last two local maxima similarly for bearish.
+
+
+Then check divergence conditions. Gating:
+
+•	For bullish divergence, maybe require the overall trend is bearish or neutral (so that a bullish reversal makes sense) and perhaps RS score is very low (the asset has been weak, which is why it’s oversold – but maybe not absolutely the weakest as those can fail).
+•	For bearish divergence, require the trend was up (to have something to diverge from) and possibly RS was high (the asset was a leader but now showing weakness).
+
+# src/patterns/divergence.py
+from data.models import Bar
+
+def detect_rsi_divergence(symbol: SymbolMeta, recent_bars: list[Bar], rsi_values: list[float], scores: ScoreBundle, config: dict):
+    """
+    Detects RSI divergences (bullish or bearish).
+    Uses the last few bars to find local extrema in price and checks RSI trends.
+    Returns a Signal if a divergence is confirmed and passes gating conditions.
+    """
+    if len(recent_bars) < 5:
+        return None
+    # Identify recent local low and previous local low (naive approach: last bar is a low if its price < previous and < next)
+    # For simplicity, find min of last N and earlier min before that
+    recent_low_idx = min(range(-config['patterns']['divergence_lookback'], 0), key=lambda i: recent_bars[i].close)
+    recent_low_price = recent_bars[recent_low_idx].close
+    recent_low_rsi = rsi_values[recent_low_idx]
+    # find a previous low before that
+    prev_low_idx = min(range(-2*config['patterns']['divergence_lookback'], -config['patterns']['divergence_lookback']), key=lambda i: recent_bars[i].close)
+    prev_low_price = recent_bars[prev_low_idx].close
+    prev_low_rsi = rsi_values[prev_low_idx]
+    bullish = False
+    if recent_low_price < prev_low_price and recent_low_rsi > prev_low_rsi:
+        # price made lower low, RSI made higher low -> bullish divergence candidate
+        bullish = True
+    # Similarly for bearish divergence:
+    recent_high_idx = max(range(-config['patterns']['divergence_lookback'], 0), key=lambda i: recent_bars[i].close)
+    recent_high_price = recent_bars[recent_high_idx].close
+    recent_high_rsi = rsi_values[recent_high_idx]
+    prev_high_idx = max(range(-2*config['patterns']['divergence_lookback'], -config['patterns']['divergence_lookback']), key=lambda i: recent_bars[i].close)
+    prev_high_price = recent_bars[prev_high_idx].close
+    prev_high_rsi = rsi_values[prev_high_idx]
+    bearish = False
+    if recent_high_price > prev_high_price and recent_high_rsi < prev_high_rsi:
+        bearish = True
+    # Now gating logic:
+    if bullish:
+        # Only consider if the asset has been in a downtrend or very oversold (maybe trend score low, RS low)
+        if scores.trend and scores.trend > config['patterns']['max_trend_for_bullish_div']:
+            bullish = False
+        if scores.relative_strength and scores.relative_strength > config['patterns']['max_rs_for_bullish_div']:
+            bullish = False
+        if bullish:
+            return {
+                "symbol": symbol.symbol,
+                "pattern": "Bullish Divergence",
+                "recent_low_price": recent_low_price,
+                "prev_low_price": prev_low_price,
+                "recent_low_rsi": recent_low_rsi,
+                "prev_low_rsi": prev_low_rsi,
+                "reason": "Price made a lower low but RSI a higher low (momentum improving in downtrend)"
+            }
+    if bearish:
+        # Only consider if asset was in uptrend (trend score high) and strong (RS high), now possibly topping
+        if scores.trend and scores.trend < config['patterns']['min_trend_for_bearish_div']:
+            bearish = False
+        if scores.relative_strength and scores.relative_strength < config['patterns']['min_rs_for_bearish_div']:
+            bearish = False
+        if bearish:
+            return {
+                "symbol": symbol.symbol,
+                "pattern": "Bearish Divergence",
+                "recent_high_price": recent_high_price,
+                "prev_high_price": prev_high_price,
+                "recent_high_rsi": recent_high_rsi,
+                "prev_high_rsi": prev_high_rsi,
+                "reason": "Price made a higher high but RSI a lower high (momentum weakening in uptrend)"
+            }
+    return None
+Key points:
+
+•	We attempt to find local extrema. (In production, one might use a smoother method or known pivot detection; here we use min over a window as a simplification.)
+•	divergence_lookback might be, say, 14 bars, to scan roughly two weeks for highs/lows.
+•	If bullish divergence condition is found, we then check gating:
+
+◦	Only accept if the context was bearish: for example, require trend score is below some small value (the asset was in downtrend) and RS is low (asset underperforming). E.g., max_trend_for_bullish_div = 40, max_rs_for_bullish_div = 30 – meaning we look for divergence only in weak contexts (because a strong coin likely won’t have bullish divergence, it’s not been down enough).
+◦	These conditions ensure we don’t mistakenly flag a slight dip in an uptrend as a “bullish divergence” when it’s not meaningful.
+•	
+•	For bearish divergence:
+
+◦	Require a prior uptrend context: e.g., min_trend_for_bearish_div = 60 (so trend was fairly strong), min_rs_for_bearish_div = 70 (the asset was a leader). This finds cases where a leader might be topping out (momentum faltering).
+•	
+•	If conditions pass, return a signal with details of the divergence (prices and RSI values for transparency). If both bullish and bearish divergences were somehow true at once (unlikely), we could in theory return both, but usually one will apply given context.
+
+
+In practice, divergences are trickier to trade, so one might use them in conjunction with other signals or as alerts to pay attention. The gating with scores ensures we are looking at meaningful divergences (bullish divergence in a downtrend could precede a bottom, bearish divergence in a strong rally could precede a top).
+
+
+Pattern Gating Summary
+
+
+Each pattern module ensures that a purely technical trigger is reinforced by the quantitative scores:
+
+•	Breakout: requires strong RS and overall confluence. This means we only alert breakouts in top-tier assets that also have volume confirmation, filtering out likely fakeouts.
+•	Squeeze: requires low volatility and at least moderate trend strength (to bias towards an upward resolution). This avoids alerting every low-volatility coin, focusing on those likely to break upward.
+•	Pullback: requires a strong trend score, so we’re effectively buying a dip in a known uptrend, not a dip in a weak asset.
+•	Divergence: requires appropriate context (weak trend for bullish divergence, strong trend for bearish divergence) so that the divergence actually matters as a reversal signal.
+
+
+All threshold values like min_rvol_for_breakout, min_rs_for_breakout, min_trend_for_squeeze, etc., are in config.yaml under a patterns section. This allows easy tweaking of how strict these gates are (e.g., one could lower the RS requirement if they want more breakout alerts at the cost of quality, or increase min_rvol to only catch very high volume breakouts).
+
+The output of detection functions is typically a Signal object or dictionary, which can be standardized, for example:
+@dataclass
+class Signal:
+    symbol: str
+    exchange: str
+    pattern: str
+    timestamp: datetime
+    details: dict    # e.g., containing specific info like price levels, indicators
+    scores: ScoreBundle
+    reason: str
+For simplicity, our pseudocode used dicts. In a real implementation, using a dataclass for signals would be better for type consistency and easier logging.
+
+
+6. Ranking & Filtering System
+
+
+After computing scores and detecting patterns for all symbols, the system needs to filter out unwanted symbols and highlight the best opportunities. The Ranking module is responsible for:
+
+•	Filtering out symbols that don’t meet basic criteria (e.g., liquidity).
+•	Compiling leaderboards such as top Relative Strength, top Confluence Score, etc.
+•	Identifying lists like Volume Surge or Volatility Squeeze candidates.
+•	Combining this information into a coherent output (e.g., a top opportunities table or lists for the report).
+
+
+
+Filters (
+ranking/filters.py
+)
+
+
+Filters exclude symbols that are not tradable or not in focus:
+
+•	Liquidity filter: ensure the symbol has sufficient trading volume (e.g., at least X USD in 24h) to avoid illiquid assets that could skew signals or be impractical to trade.
+•	Feasibility filter: ensure that potential trade setups have a reasonable stop-loss distance relative to volatility, etc. For instance, if an asset’s ATR is huge relative to price, or if the recent swing low (potential stop) is very far, it might be too risky or not suitable for a standard trading strategy.
+•	Watchlist filter: optionally, allow scanning to focus on a predefined watchlist of symbols. If config has a watchlist mode, we might exclude symbols not in that list, or vice versa.
+
+
+Example pseudocode for filters:
+# src/ranking/filters.py
+from data.models import SymbolMeta, Bar
+
+def pass_liquidity(symbol: SymbolMeta, config: dict) -> bool:
+    """Check if symbol meets liquidity requirements (e.g., min 24h USD volume)."""
+    min_vol = config['filters']['min_liquidity_usd']
+    # Assume symbol meta or an external lookup provides 24h volume in USD
+    if hasattr(symbol, 'daily_volume_usd'):
+        return symbol.daily_volume_usd >= min_vol
+    else:
+        # if symbol meta doesn't have volume, this might require a separate call or be part of universe discovery
+        return True  # If unknown, default to true or handle elsewhere
+
+def pass_feasibility(symbol: SymbolMeta, bars: list[Bar], config: dict) -> bool:
+    """Check if a potential trade is feasible from a risk management perspective.
+    E.g., ensure stop-loss (recent swing low) is within acceptable percent of current price."""
+    max_stop_pct = config['filters']['max_stop_distance_pct']  # e.g., 0.05 for 5%
+    if not bars:
+        return True
+    last_price = bars[-1].close
+    # Find recent swing low (e.g., lowest low in last N bars)
+    lookback = config['filters'].get('swing_lookback', 20)
+    recent_low = min(bar.low for bar in bars[-lookback:]) if len(bars) >= lookback else min(bar.low for bar in bars)
+    if (last_price - recent_low) / last_price > max_stop_pct:
+        # If the distance to last swing low is more than max_stop_pct of price, then stop would be too wide
+        return False
+    return True
+
+def apply_watchlist_filter(symbols: list[SymbolMeta], config: dict) -> list[SymbolMeta]:
+    """If a watchlist is specified in config, filter symbols to only those in watchlist or mark them."""
+    watchlist = config['universe'].get('watchlist')
+    if watchlist:
+        return [s for s in symbols if s.symbol in watchlist]
+    else:
+        return symbols  # no filtering if no watchlist specified
+
+•	pass_liquidity: We check if the symbol’s 24h volume in USD (or another liquidity metric) is above a threshold. This might require that during universe discovery we attached a daily_volume_usd attribute to SymbolMeta (e.g., from exchange data). If not available, we could query an API or skip the check (assuming our universe was already filtered by volume).
+•	pass_feasibility: We find a recent swing low as a logical stop-loss point (for a long entry). If that low is too far below current price (as a fraction), the trade might require risking too much. For example, if a coin is $100 and recent low is $80, that’s a 20% drop, likely too wide for a typical trade if max_stop_distance_pct is 5%. So we’d filter it out (the move is too extended or volatile to safely enter now). ATR could also be used: e.g., if ATR is $15 (15%), maybe skip as well. We use swing low here; config could allow switching to an ATR-based rule or combine them.
+•	watchlist: If the user only wants to scan a specific list, we filter others out. Alternatively, if config has universe.include and universe.exclude lists, we could incorporate those. The architecture leaves room for flexible universe control.
+
+
+These filters will be applied right after computing scores/patterns, before final ranking or alerting.
+
+
+Leaderboards and Lists (
+ranking/ranking.py
+)
+
+
+We want to produce:
+
+•	RS leaderboard: sorted symbols by RS score descending.
+•	Confluence top list: sorted by confluence score.
+•	Volume surge list: symbols with volume_score or volume features indicating unusual volume (could be threshold-based or top X by volume_score).
+•	Volatility squeeze list: symbols with low volatility_score (or detected squeeze pattern).
+•	Possibly other lists like “most improved” or “laggards” if needed, but not specified.
+
+
+And also combine patterns:
+
+•	For example, we might compile all breakout signals, all pullback signals, etc., into their own lists.
+
+
+Pseudo-code example:
+# src/ranking/ranking.py
+def get_top_n(symbol_results: list, key: str, n: int) -> list:
+    """Return the top n symbols sorted by the given score key (e.g., 'relative_strength' or 'confluence')."""
+    sorted_list = sorted(symbol_results, key=lambda x: getattr(x['score_bundle'], key) or 0, reverse=True)
+    return sorted_list[:n]
+
+def filter_by_threshold(symbol_results: list, key: str, min_value: float) -> list:
+    """Return symbols where score[key] >= min_value."""
+    return [res for res in symbol_results if getattr(res['score_bundle'], key) is not None and getattr(res['score_bundle'], key) >= min_value]
+
+def compile_leaderboards(results: list, config: dict):
+    """Create various sorted lists of symbols based on different criteria."""
+    top_confluence = get_top_n(results, 'confluence', config['ranking']['top_n'])
+    top_rs = get_top_n(results, 'relative_strength', config['ranking']['top_n'])
+    # Volume surge: either threshold or percentile
+    volume_surge = [res for res in results if res['score_bundle'].volume is not None and res['score_bundle'].volume >= config['ranking']['volume_score_min']]
+    # Or perhaps top 5 volume score
+    volume_surge = sorted(volume_surge, key=lambda x: x['score_bundle'].volume, reverse=True)[:config['ranking']['top_n']]
+    # Volatility squeeze list: perhaps filter low volatility_score or directly from pattern signals
+    vol_squeezes = [res for res in results if res['score_bundle'].volatility is not None and res['score_bundle'].volatility <= config['ranking']['volatility_score_max']]
+    # Or use detected patterns:
+    squeeze_signals = [res for res in results for sig in res['pattern_signals'] if sig['pattern'] == "Volatility Squeeze"]
+    vol_squeeze_list = squeeze_signals or vol_squeezes  # prefer explicit signals
+    # Breakouts:
+    breakout_signals = [res for res in results for sig in res['pattern_signals'] if sig['pattern'] == "Breakout"]
+    # We can similarly get pullbacks and divergences if needed:
+    pullback_signals = [res for res in results for sig in res['pattern_signals'] if sig['pattern'] == "HolyGrail Pullback"]
+    divergence_signals = [res for res in results for sig in res['pattern_signals'] if "Divergence" in sig['pattern']]
+    return {
+        "top_confluence": top_confluence,
+        "top_relative_strength": top_rs,
+        "volume_surge": volume_surge,
+        "volatility_squeeze": vol_squeeze_list,
+        "breakouts": breakout_signals,
+        "pullbacks": pullback_signals,
+        "divergences": divergence_signals
+    }
+This code outlines how we might gather lists:
+
+•	get_top_n is a helper to sort and slice the results by a given score attribute.
+•	filter_by_threshold is a generic threshold filter (could be used for e.g., RS >= 70).
+•	compile_leaderboards uses both approaches:
+
+◦	Top Confluence and top RS (taking top N as specified in config, e.g., top 10).
+◦	Volume surge list: maybe those with volume score above a certain level. We show two approaches: threshold-based or just top N by volume score.
+◦	Volatility squeeze list: we prefer to use the actual pattern detection results (because a low volatility score alone might not guarantee a squeeze breakout; pattern ensures it’s starting to move). So if we have any signals labeled “Volatility Squeeze”, use those. If none, we could fallback to any symbol with volatility_score extremely low.
+◦	Breakouts list: similarly, from pattern signals.
+◦	Pullbacks and divergences from pattern signals too.
+•	
+•	The result is a dictionary of lists for each category.
+
+
+We also might integrate the feasibility filter at this stage. Actually, the filters should be applied to results (the list of dicts containing symbol info) before compiling leaderboards. So likely in main loop, we already skip adding results that fail filters. If not, we could filter them out here:
+results = [res for res in results if filters.pass_liquidity(res['symbol_meta'], config) and filters.pass_feasibility(res['symbol_meta'], res['bars'], config)]
+Assuming results entries contain the symbol and bars.
+
+Top Opportunities Table: Once we have these lists, we want to present a consolidated view of the best setups. For instance, one might create a table of the top Confluence Score symbols, with columns for key scores and any pattern flags.
+
+Example assembly (pseudocode):
+def format_top_opportunities(top_confluence_list: list) -> str:
+    """Format a markdown table of top confluence opportunities with key data."""
+    if not top_confluence_list:
+        return "*(No high-confluence setups found)*"
+    # Table header
+    md = "| Symbol | Confluence | Trend | Volume | Volatility | RS | Positioning | Notes |\n"
+    md += "|--------|------------|-------|--------|------------|----|-------------|-------|\n"
+    for res in top_confluence_list:
+        sym = res['symbol']
+        scores = res['score_bundle']
+        patterns = [sig['pattern'] for sig in res.get('pattern_signals', [])]
+        notes = ", ".join(patterns) if patterns else ""
+        md += f"| {sym} | {scores.confluence:.0f} | {scores.trend:.0f} | {scores.volume:.0f} | {scores.volatility:.0f} | {scores.relative_strength:.0f} | {scores.positioning if scores.positioning is not None else '-':.0f} | {notes} |\n"
+    return md
+This hypothetical function generates a markdown table. It lists each symbol, its scores (rounded), and any pattern signals as notes. The positioning score cell shows ‘-’ if not applicable. This kind of table would highlight, for example, if a symbol has a breakout or squeeze flag in the notes column.
+
+We can generate similar tables or bullet lists for RS leaders or other categories as needed for the report. However, the above suggests how to combine multiple data points (scores + patterns) into one view.
+
+Ranking strategy: The question mentions “Top Opportunities table”. This implies an output combining the most promising symbols. A typical approach:
+
+•	Take the top X by Confluence Score (since that already blends everything).
+•	Within those, one might further filter to those that also have a specific pattern trigger or volume confirmation, etc. But likely Confluence top already signifies strong across the board.
+•	Another approach: pick top RS (momentum leaders), top volume surges (something happening now), top squeezes (ready to move). These could be separate lists in the report.
+
+
+In an automated scanner context, the “Top Opportunities” might be essentially the confluence top list annotated with patterns:
+Those with high scores and maybe a pattern trigger get highlighted as immediate trade ideas. Those with high scores but no trigger might still be watchlist candidates (they have good setup but waiting for trigger).
+
+We should ensure to mention a watchlist builder: Possibly meaning:
+
+•	After scanning, produce a watchlist of symbols that are close to triggering or generally scoring above some threshold, to monitor in coming days.
+•	For example, all symbols with Confluence Score > 70 get on the watchlist. Or those with volatility_score high (meaning low vol environment ready to break) and decent trend are potential future breakouts.
+
+
+So we could have:
+watchlist = [res for res in results if res['score_bundle'].confluence and res['score_bundle'].confluence >= config['ranking']['watchlist_confluence_min']]
+Additionally, adding any symbol that had a pattern signal goes to watchlist (since something happened).
+But since those are immediate signals, they’d be alerted anyway.
+
+Alternatively, the user might maintain a manual watchlist and we highlight if any of those have good scores or signals.
+
+Our architecture can support both:
+
+•	We already have apply_watchlist_filter to restrict scanning to a list if needed.
+•	We could also produce a section in report that lists “Symbols to Watch” perhaps defined in config or by criteria.
+
+
+In summary:
+
+•	We filter out low-liquidity and untradable setups early.
+•	We rank the remaining by various metrics.
+•	We combine them to identify key opportunities, which will feed into alerts and the daily report.
+
+
+All these thresholds and numbers (min_liquidity_usd, max_stop_distance_pct, top_n count, volume_score_min, volatility_score_max, etc.) are defined in config for easy adjustment.
+
+
+7. Alerts & Reporting Modules
+
+
+The system provides outputs in two forms:
+
+•	Real-time Alerts: Immediate notifications when certain patterns are detected (e.g., a breakout happening now).
+•	End-of-Day Reports: A comprehensive summary at the end of each scan (trading day) highlighting market conditions and notable setups.
+
+
+These are handled by the alerts and reports modules.
+
+
+Real-time Alerts (
+alerts/real_time.py
+ and 
+alerts/notifier.py
+)
+
+
+For real-time alerts, we integrate with external channels such as Telegram or webhooks (could be Slack, Discord, etc.). The architecture will have an AlertService or simply functions that send messages.
+
+Telegram Bot Alert: We assume we have a bot token and chat ID in config. We can use a library like python-telegram-bot or just requests to Telegram’s API.
+
+Webhook Alert: A generic webhook (like a Slack incoming webhook URL) can receive JSON or text payloads.
+
+We ensure each alert contains:
+
+•	Symbol (and exchange if needed)
+•	Pattern name
+•	Key scores and context
+•	A brief reason/explanation (as crafted in the Signal reason field)
+•	Possibly a suggestion or classification (like “Confirmed breakout” or “Watch closely”).
+
+
+Pseudo-code for sending alerts:
+# src/alerts/real_time.py
+import requests
+from datetime import datetime
+
+def format_signal_message(signal: dict) -> str:
+    """Format a text message for a signal alert including scores and reasoning."""
+    sym = signal['symbol']
+    pattern = signal['pattern']
+    reason = signal.get('reason', '')
+    # If ScoreBundle is attached
+    scores = signal.get('scores')
+    if scores:
+        conf = scores.confluence or 0
+        rs = scores.relative_strength or 0
+        vol = scores.volume or 0
+        trend = scores.trend or 0
+        msg = (f"⚡ Alert: {sym} {pattern} detected!\n"
+               f"Confluence Score: {conf:.0f}, Trend: {trend:.0f}, Volume: {vol:.0f}, RS: {rs:.0f}\n"
+               f"Details: {reason}")
+    else:
+        msg = f"⚡ Alert: {sym} {pattern} detected! {reason}"
+    return msg
+
+def send_telegram_alert(message: str, config: dict):
+    """Send a message via Telegram bot."""
+    token = config['alerts']['telegram']['token']
+    chat_id = config['alerts']['telegram']['chat_id']
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        # handle exception (log it)
+        print(f"Telegram send failed: {e}")
+
+def send_webhook_alert(message: str, config: dict):
+    """Send a message to a generic webhook (e.g., Slack)."""
+    webhook_url = config['alerts']['webhook']['url']
+    try:
+        requests.post(webhook_url, json={"text": message}, timeout=5)
+    except Exception as e:
+        print(f"Webhook send failed: {e}")
+
+def notify_signal(signal: dict, config: dict):
+    """Send out notifications for a detected signal according to config settings."""
+    msg = format_signal_message(signal)
+    if config['alerts']['telegram'].get('enabled', True):
+        send_telegram_alert(msg, config)
+    if config['alerts']['webhook'].get('enabled', False):
+        send_webhook_alert(msg, config)
+    # Could extend to email or other channels as needed
+What this does:
+
+•	format_signal_message creates a human-readable text. It uses emojis or formatting for visibility. It includes the confluence and component scores for context, and the reason from the signal which explains the technical trigger.
+•	send_telegram_alert and send_webhook_alert handle the actual sending. They use requests.post to Telegram API and a given webhook respectively. In production, these should be robust (with error handling and maybe retries).
+•	notify_signal checks config to see which channels are enabled and sends accordingly.
+
+
+We will call notify_signal for each signal that should trigger an immediate alert. We might not want to alert on every pattern; maybe only the most actionable ones. For example, breakouts and possibly pullbacks could be immediate trade signals – those we alert. Squeezes might be more of a “setup forming” notification. Divergences might be less actionable immediately (unless one trades them explicitly).
+
+The config might have toggles like:
+alerts:
+  telegram:
+    enabled: true
+    token: "123456:ABC-DEF"
+    chat_id: "987654321"
+  webhook:
+    enabled: false
+    url: "https://hooks.slack.com/services/..."
+  signals:
+    breakout: true
+    squeeze: true
+    pullback: true
+    divergence: false   # maybe we don't alert divergences in real-time, just include in report
+We could incorporate that in notify_signal to decide if a pattern type is to be alerted.
+
+Each alert message provides a quick snapshot so the user can take action or inspect the chart manually.
+
+
+End-of-Day Report (
+reports/daily_report.py
+)
+
+
+The end-of-day (or end-of-run) report consolidates everything into a markdown (or text) report. This can be sent via email, Telegram (if small enough), or stored as a file/DB entry. Markdown is nice for formatting (and if sending to a platform like Telegram or Slack that supports basic formatting, or converting to HTML for email).
+
+Contents of the report as requested:
+
+•	Market health & regime: Summarize BTC trend, market breadth, and regime classification.
+•	RS leaders: List top relative strength symbols (those leading the market).
+•	Top Confluence setups: List symbols with highest confluence scores (these often are the ones nearing or just having a breakout).
+•	Significant breakouts: List any breakouts that triggered today.
+•	Notable volatility squeezes: List any low-volatility setups that were identified (they might break out soon).
+•	Symbols to watch next session: This could include any symbol that has a high score but maybe not triggered, or those in a squeeze ready to go, etc. Essentially a watchlist for tomorrow.
+
+
+We format these as sections in markdown:
+# src/reports/daily_report.py
+from datetime import datetime
+
+def generate_daily_report(market_health: MarketHealth, leaderboards: dict, results: list, config: dict) -> str:
+    """Generate a markdown report of the day's analysis."""
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")  # or use local time if needed
+    report_lines = []
+    # Header
+    report_lines.append(f"# Daily Market Report - {date_str}")
+    # Market health summary
+    regime = market_health.regime.capitalize()
+    btc_trend = market_health.btc_trend if isinstance(market_health.btc_trend, str) else f"{market_health.btc_trend:.1f}"
+    breadth = market_health.breadth
+    report_lines.append(f"**Market Regime:** {regime} (BTC Trend: {btc_trend}, Market Breadth: {breadth:.0f}% of symbols in uptrend)")
+    report_lines.append("")  # blank line
+    
+    # Top RS Leaders
+    report_lines.append("## Top Relative Strength Leaders")
+    if leaderboards['top_relative_strength']:
+        for res in leaderboards['top_relative_strength'][:config['report']['num_leaders']]:
+            sym = res['symbol']
+            rs_score = res['score_bundle'].relative_strength or 0
+            perf_1m = res.get('perf_1m', None)
+            # If we had stored 1M performance in results, use it. Otherwise, the RS score itself implies percentile.
+            line = f"- **{sym}**: RS Score {rs_score:.0f}"
+            if perf_1m:
+                line += f" (1M Change: {perf_1m:.1f}%)"
+            report_lines.append(line)
+    else:
+        report_lines.append("- *(No data)*")
+    report_lines.append("")
+    
+    # Top Confluence Setups
+    report_lines.append("## Top Confluence Setups")
+    if leaderboards['top_confluence']:
+        # We can use the format_top_opportunities function from Ranking to include more columns in a table.
+        table_md = format_top_opportunities(leaderboards['top_confluence'][:config['report']['num_setups']])
+        report_lines.append(table_md)
+    else:
+        report_lines.append("*(None)*")
+    report_lines.append("")
+    
+    # Significant Breakouts
+    report_lines.append("## Breakouts Today")
+    if leaderboards['breakouts']:
+        for res in leaderboards['breakouts']:
+            sym = res['symbol']
+            # We stored pattern signals in results; each 'res' here is actually a result with a breakout signal
+            # We might want to include breakout price or rvol from the signal
+            signals = [s for s in res['pattern_signals'] if s['pattern'] == "Breakout"]
+            for sig in signals:
+                price = sig.get('price')
+                rvol = sig.get('rvol')
+                line = f"- {sym} broke out above **{sig['pivot']:.2f}**, closing at {price:.2f} (RVOL {rvol}x)."
+                report_lines.append(line)
+    else:
+        report_lines.append("- None")
+    report_lines.append("")
+    
+    # Notable Volatility Squeezes
+    report_lines.append("## Notable Squeeze Setups")
+    if leaderboards['volatility_squeeze']:
+        for res in leaderboards['volatility_squeeze']:
+            sym = res['symbol']
+            vol_score = res['score_bundle'].volatility or 0
+            # If it was a signal:
+            signal = None
+            if res.get('pattern_signals'):
+                for s in res['pattern_signals']:
+                    if s['pattern'] == "Volatility Squeeze":
+                        signal = s
+                        break
+            if signal:
+                line = f"- {sym}: Squeeze identified (volatility {signal['vol_percentile']*100:.0f}th percentile). Potential breakout brewing."
+            else:
+                line = f"- {sym}: Volatility Score {vol_score:.0f} (very low). Monitor for breakout."
+            report_lines.append(line)
+    else:
+        report_lines.append("- None")
+    report_lines.append("")
+    
+    # Watchlist for Next Session
+    report_lines.append("## Watchlist for Next Session")
+    watch_symbols = [res for res in results if res['score_bundle'].confluence and res['score_bundle'].confluence >= config['report']['watchlist_min_confluence']]
+    # Also include any patterns that didn't fully trigger as early watch
+    # e.g., assets with squeeze but not broken out yet (which we likely already included above).
+    if watch_symbols:
+        for res in watch_symbols:
+            sym = res['symbol']
+            conf = res['score_bundle'].confluence or 0
+            note = ""
+            if any(sig['pattern']=="Volatility Squeeze" for sig in res.get('pattern_signals', [])):
+                note = "(Squeeze setup)"
+            elif res['score_bundle'].relative_strength and res['score_bundle'].relative_strength >= 80 and conf >= 70:
+                note = "(Strong leader)"
+            report_lines.append(f"- {sym}: Confluence {conf:.0f} {note}")
+    else:
+        report_lines.append("- No watchlist candidates (already covered above).")
+    
+    # Join lines
+    return "\n".join(report_lines)
+This outlines the report structure:
+
+•	A title with date.
+•	Market regime summary in bold.
+•	Top RS Leaders: printed as a bullet list. Could also be a table, but a list is fine for a few items. It shows symbol and RS score, possibly actual 1M performance if we have it computed (we could store each symbol’s 1M return in results for reporting).
+•	Top Confluence Setups: we use the table function to list maybe top 5 or 10 by confluence, with scores and patterns noted. This is the core setups table.
+•	Breakouts Today: bullet list each breakout signal from this run, describing the pivot and volume. That tells the user which symbols actually broke out with volume.
+•	Squeezes: list symbols identified as in a squeeze (some might have started moving, some not). We either reference a signal (with vol percentile) or just mention low volatility score.
+•	Watchlist: list any other symbols that merit watching next session. For example, maybe those with high confluence that didn’t break out yet (still forming). Or possibly any pattern that is near trigger (maybe we identified a squeeze but it hasn’t broken out, which we already list under squeezes).
+We define watchlist here simply by confluence threshold (say any with confluence >= 70 that didn’t appear in breakouts list already).
+We annotate if they have a squeeze or if they are just strong RS ones.
+
+
+Once the markdown is generated:
+
+•	We can send it via a Telegram message (if not too long, or maybe split into multiple messages if needed).
+•	Or email it (if an email SMTP integration is configured).
+•	Or save to a file or database (for record or web viewing).
+
+
+The config for report might include num_leaders, num_setups, watchlist_min_confluence, etc., to control how many items to include and thresholds for watchlist inclusion.
+
+Alerts vs Reports Storage: We should also mention that beyond sending, we log these:
+
+•	If using Postgres, repository.save_signals can store each alert that was sent (with timestamp and details).
+•	repository.save_report can store the text of the report or key summary stats in a table for reference.
+
+
+This way, we can review past alerts and reports (useful for debugging or backtesting analysis).
+
+
+8. Backtesting & Validation Framework
+
+
+To validate the effectiveness of our scoring and signals, we include a simple backtesting/event-study module. This isn’t a full trading strategy backtester (which would involve entries, exits, PnL), but rather an analysis of how signals perform on average after they trigger. The goal is to measure metrics like precision (how often signals lead to positive outcomes), recall (coverage of moves), and to help tune thresholds.
+
+The backtest module will:
+
+•	Simulate or iterate through historical periods, generate signals using the same logic, and record outcomes.
+•	For each pattern signal triggered, look ahead a fixed horizon (e.g., 1 day, 3 days, 7 days) to compute forward returns or max gain.
+•	Determine if the signal was successful (e.g., price went up X% in next 7 days) or not.
+•	Aggregate statistics by pattern and maybe by score buckets.
+
+
+We outline a simplified approach:
+# src/backtest/backtest_engine.py
+from datetime import timedelta
+
+def run_backtest(symbols: list[SymbolMeta], start_date: datetime, end_date: datetime, repository: DataRepository, config: dict):
+    """
+    Run a historical backtest of signals between start_date and end_date.
+    For each day (or each period), compute signals, and evaluate outcomes.
+    """
+    results = []  # to accumulate outcomes
+    current_date = start_date
+    while current_date <= end_date:
+        # Simulate running the scanner on current_date as if it's end-of-day.
+        scores_list = []
+        signals_list = []
+        market_health = None
+        try:
+            # We might reuse the main pipeline logic but restricted to that date's data.
+            # For each symbol, fetch data up to current_date:
+            all_bars = {}
+            for sym in symbols:
+                bars = repository.fetch_ohlcv(sym, timeframe=config['timeframes']['primary'], 
+                                              start=current_date - timedelta(days=200), end=current_date)
+                all_bars[sym.symbol] = bars
+            # Compute market health using data up to current_date
+            market_health = repository.compute_market_health(symbols, all_bars)
+            regime = market_health.regime
+            for sym in symbols:
+                bars = all_bars[sym.symbol]
+                if not bars:
+                    continue
+                # compute features and scores similarly as in main pipeline
+                trend_feats = features.trend.compute_trend_features(bars, config)  # assume a wrapper that returns dict
+                vol_feats = features.volatility.compute_volatility_features(bars, config)
+                volu_feats = features.volume.compute_volume_features(bars, config)
+                rs_feats = features.relative_strength.compute_rs_features(sym, all_bars, config)
+                pos_feats = features.positioning.compute_positioning_features(sym, repository.fetch_derivatives_metrics(sym, ...))
+                # compute scores
+                trend_score = scoring.trend_score.compute_trend_score(trend_feats, config)
+                volume_score = scoring.volume_score.compute_volume_score(volu_feats, config)
+                vol_score = scoring.volatility_score.compute_volatility_score(vol_feats, config)
+                rs_score = scoring.rs_score.compute_relative_strength_score(rs_feats, config)
+                positioning_score = scoring.positioning_score.compute_positioning_score(pos_feats, config)
+                score_bundle = ScoreBundle(trend_score, volume_score, vol_score, rs_score, positioning_score)
+                confluence, confidence = scoring.confluence.compute_confluence_score(score_bundle, regime, config)
+                score_bundle.confluence = confluence
+                score_bundle.confidence = confidence
+                # detect patterns
+                # (We would call detect_breakout, etc., similarly, passing in the relevant features and scores)
+                if pattern.breakout.detect_breakout(sym, bars, score_bundle, config):
+                    signals_list.append((current_date, sym.symbol, "Breakout"))
+                if pattern.volatility_squeeze.detect_volatility_squeeze(sym, bars, vol_feats, score_bundle, config):
+                    signals_list.append((current_date, sym.symbol, "Squeeze"))
+                # (Similarly for pullback and divergence if desired)
+        except Exception as e:
+            # handle data fetch errors or others
+            current_date += timedelta(days=1)
+            continue
+
+        # For each signal triggered on current_date, evaluate outcome:
+        for (date, symbol, pattern) in signals_list:
+            # We define success criteria, e.g., price % change in next 7 days > some threshold
+            future_bars = repository.fetch_ohlcv(SymbolMeta(symbol=symbol, ...), timeframe=config['timeframes']['primary'],
+                                                 start=date + timedelta(days=1), end=date + timedelta(days=7))
+            if not future_bars:
+                continue
+            # Calculate forward returns
+            entry_price = all_bars[symbol][-1].close  # price at signal
+            exit_price_7d = future_bars[-1].close
+            max_price = max(bar.high for bar in future_bars)
+            return_7d = (exit_price_7d - entry_price) / entry_price * 100
+            max_gain = (max_price - entry_price) / entry_price * 100
+            success = max_gain >= config['backtest']['success_threshold_pct']
+            results.append({
+                "date": date,
+                "symbol": symbol,
+                "pattern": pattern,
+                "entry_price": entry_price,
+                "7d_return": return_7d,
+                "max_gain": max_gain,
+                "success": success
+            })
+        current_date += timedelta(days=1)
+    # After loop, analyze results:
+    summary = analyze_results(results)
+    return summary
+
+def analyze_results(results: list) -> dict:
+    """Compute aggregated metrics like precision, recall, win rate for each pattern."""
+    summary = {}
+    patterns = set(r['pattern'] for r in results)
+    for patt in patterns:
+        patt_results = [r for r in results if r['pattern'] == patt]
+        if not patt_results:
+            continue
+        total = len(patt_results)
+        successes = sum(1 for r in patt_results if r['success'])
+        precision = successes / total if total > 0 else 0
+        avg_return = sum(r['7d_return'] for r in patt_results) / total if total>0 else 0
+        avg_max_gain = sum(r['max_gain'] for r in patt_results) / total if total>0 else 0
+        summary[patt] = {
+            "signals": total,
+            "success_rate": precision,
+            "avg_7d_return": avg_return,
+            "avg_max_gain": avg_max_gain
+        }
+    # We might also compute recall if we define what "opportunities" were missed (that requires identifying all big moves).
+    return summary
+This pseudocode is quite verbose; key points:
+
+•	We loop through each day (or each relevant period) in history. On each date, we essentially run the scanning logic (limited by that date’s data).
+•	We gather signals that would have triggered on that date.
+•	Then for each signal, fetch the next 7 days of data to see how price moved. We compute:
+
+◦	Actual 7-day return,
+◦	Max gain within those 7 days (to capture if it spiked then fell, etc.),
+◦	Mark success if max gain exceeded some threshold (say +5%). The success_threshold_pct can be set in config to define what we consider a “hit”. (Alternatively, success could be if return after 7 days is positive, or any custom criterion.)
+•	
+•	We store each outcome in results.
+•	After simulation, we aggregate by pattern:
+
+◦	Precision (success_rate) = successes / total signals for that pattern.
+◦	Average returns, etc.
+◦	We could also compute overall precision (all signals combined).
+•	
+•	Recall would require knowing the “universe of opportunities”. For example, how many breakouts happened in reality versus how many we caught. That’s complex to define without an external definition of “ground truth” breakout events. We might skip recall or approximate it by saying recall is the fraction of top X moves that had signals.
+•	Confusion matrix concept: If we had categories like “predicted breakout vs no breakout” vs “actual breakout vs no breakout”, we could do that, but it’s complicated because “actual breakout” isn’t a binary classification known ahead, it’s somewhat subjective. Instead, focusing on precision and average gains is more straightforward for validation.
+
+
+The analyze_results function above computes summary stats per pattern type. For example, it might output:
+{
+  "Breakout": {"signals": 50, "success_rate": 0.6, "avg_7d_return": 3.2, "avg_max_gain": 7.5},
+  "Squeeze": {"signals": 30, "success_rate": 0.5, "avg_7d_return": 1.0, "avg_max_gain": 5.0},
+  "Pullback": {...},
+  ...
+}
+This tells us which patterns are more reliable. We might adjust thresholds based on this (e.g., if too many false signals, tighten criteria).
+
+We should note:
+
+•	The backtest as written is quite heavy (looping daily, fetching data repeatedly). In practice, one might vectorize or use database queries to get all signals historically in one pass, but this is an architecture outline so clarity is fine.
+•	We’d definitely reuse the same functions from our main pipeline for feature and score calculation to ensure consistency. (In pseudocode, I directly called them; in actual code, one might refactor main to be reusable or call into the scoring functions.)
+•	The backtest can be run on historical data loaded in the DB. Alternatively, if scores and signals were saved in the DB for each day by the live runs, one could just query those to evaluate performance. But if we are developing the model, we will likely simulate it historically as above.
+
+
+Finally, the backtest module could produce output such as:
+
+•	Print or log the summary stats.
+•	Possibly create confusion matrix-like output if we have a notion of actual events vs signals.
+•	For example, for breakout pattern, one could define an “actual breakout event” as any 7-day return > X% and see how many of those had a signal. But that goes deeper. We focus on precision which is more directly useful (if precision is low, signals often fail, meaning we need to tighten criteria).
+
+
+We might present results in tables or simply in logs. This backtesting framework allows us to validate and tune the Confluence Score model and pattern conditions using historical data.
+
+
+9. Example 
+config.yaml
+
+
+Below is an example config.yaml illustrating the structure and some hypothetical values. This configuration covers exchanges, universe selection, timeframes, thresholds, scoring weights, alerts, schedule, and model parameters. All the numbers can be adjusted without touching the code:
+# config.yaml
+data:
+  storage: "postgres"
+  postgres:
+    host: "localhost"
+    port: 5432
+    database: "crypto_scanner"
+    user: "username"
+    password: "password"
+  fetch_missing: true           # if true, fetch data from API if not in DB
+
+exchanges:
+  - name: binance
+    type: ccxt                 # use CCXT for Binance
+    enable_perpetual: true     # include perpetual futures in universe
+  - name: coinbase
+    type: ccxt
+    enable_perpetual: false
+
+universe:
+  mode: "discover"             # or "static"
+  discover:
+    quote_assets: ["USDT", "USD"]   # for discover mode, include symbols with these quote currencies
+    top_n_volume: 100               # limit to top 100 by volume if many
+    exclude_symbols: ["BCC/USDT"]   # example of excluding specific symbols if needed
+  # If mode was static, we'd have:
+  # symbols:
+  #   - exchange: binance
+  #     symbol: BTC/USDT:PERP
+  #   - exchange: binance
+  #     symbol: ETH/USDT:PERP
+  #   - exchange: coinbase
+  #     symbol: BTC/USD
+  # watchlist: [DOT/USDT, SOL/USDT]  # optional: highlight these symbols in reports if present
+
+timeframes:
+  primary: "1d"                # main timeframe for scanning
+  secondary: "4h"              # secondary timeframe (optional, could be used for intraday pattern fine-tuning)
+
+thresholds:
+  rs_rank_cutoff: 70           # e.g., RS score >=70 considered strong
+  rvol_multiplier: 1.5         # need 1.5x average volume for breakout confirmation
+  bb_squeeze_percentile: 0.10  # 10th percentile or below for volatility squeeze
+  adx_trend_threshold: 25      # ADX >=25 indicates a trending market
+
+scoring:
+  trend:
+    ma_short: 20
+    ma_long: 50
+    ma_alignment_points: 20
+    ma_slope_factor: 1000       # factor to convert MA slope to points
+    ma_slope_max: 20           # cap points from MA slope
+    adx_persistence_weight: 30  # max points from ADX persistence
+    max_desired_distance_pct: 15  # if price >15% above MA, start penalizing
+    distance_penalty_factor: 1   # 1 point penalty per % above threshold
+    persistence_weight: 10      # points from trend persistence
+  volume:
+    rvol_threshold: 2.0        # RVOL of 2.0 (200%) for full points
+    rvol_points_max: 30
+    obv_positive_points: 10
+    obv_negative_points: 0
+    accumulation_points: 5
+    volume_spike_bonus: 5
+  volatility:
+    vol_percentile_weight: 1.0
+    vcp_weight: 20
+    atr_extreme_pct: 10        # ATR% above 10% considered extreme
+    atr_penalty_factor: 1
+  relative_strength:
+    weight_1m: 0.4
+    weight_3m: 0.6
+    smooth_days: 3             # smooth RS by 3-day average (if desired)
+  positioning:
+    funding_negative_factor: 10000    # scale for negative funding (e.g., -0.01 -> +10 points)
+    funding_max_bonus: 15
+    funding_positive_factor: 5000    # scale for positive funding (0.01 -> -5 points)
+    funding_max_penalty: 10
+    zscore_bonus_factor: 5           # each -1 z-score -> +5 points
+    zscore_max_bonus: 15
+    zscore_penalty_factor: 5         # each +1 z-score -> -5 points
+    zscore_max_penalty: 15
+    oi_positive_threshold: 10       # +10% OI considered significant rise
+    oi_positive_points: 5
+    oi_negative_threshold: -10      # -10% OI (drop) considered significant
+    oi_negative_points: 2           # mild penalty for OI drop
+  weights:
+    bull:      {"trend": 0.30, "volume": 0.20, "volatility": 0.15, "relative_strength": 0.25, "positioning": 0.10}
+    sideways:  {"trend": 0.20, "volume": 0.20, "volatility": 0.30, "relative_strength": 0.20, "positioning": 0.10}
+    bear:      {"trend": 0.10, "volume": 0.20, "volatility": 0.20, "relative_strength": 0.10, "positioning": 0.40}
+  classification:
+    emerging_min: 60    # Confluence 60-79 => Emerging Setup
+    breakout_min: 80    # Confluence 80-89 => Confirmed Breakout
+    extended_min: 90    # Confluence >=90  => Extended (overbought)
+
+patterns:
+  breakout_lookback: 20
+  min_rvol_for_breakout: 1.5
+  min_rs_for_breakout: 60
+  min_confluence_for_breakout: 70
+  squeeze_vol_percentile_max: 0.10
+  min_trend_for_squeeze: 60
+  min_rs_for_squeeze: 50         # (optional, require moderate RS)
+  min_adx_for_pullback: 25
+  ema20_tolerance: 0.02          # 2% within EMA20 counts as touch
+  min_trend_for_pullback: 70
+  divergence_lookback: 14
+  max_trend_for_bullish_div: 40
+  max_rs_for_bullish_div: 30
+  min_trend_for_bearish_div: 60
+  min_rs_for_bearish_div: 70
+
+filters:
+  min_liquidity_usd: 5000000    # exclude symbols with < $5M daily volume
+  max_stop_distance_pct: 0.05   # 5% max stop distance (from current price to swing low)
+  swing_lookback: 15            # lookback period for swing low in feasibility check
+
+ranking:
+  top_n: 10                     # number of symbols to include in top lists
+  volume_score_min: 70          # volume score >=70 to consider volume surge list
+  volatility_score_max: 30      # volatility score <=30 to consider in squeeze list
+  watchlist_confluence_min: 70  # symbols with confluence >=70 are watchlist candidates
+
+alerts:
+  telegram:
+    enabled: true
+    token: "<TELEGRAM_BOT_TOKEN>"
+    chat_id: "<TELEGRAM_CHAT_ID>"
+  webhook:
+    enabled: false
+    url: "https://hooks.slack.com/services/XYZ/XYZ"   # example Slack webhook
+  signals:
+    breakout: true
+    squeeze: true
+    pullback: true
+    divergence: false   # maybe we don't alert divergence in real-time
+
+schedule:
+  frequency: "daily"            # daily run
+  run_time: "00:00"             # midnight UTC (just after daily candle close for crypto)
+  # (If needed, could have multiple times or 4h interval etc.)
+
+report:
+  num_leaders: 5
+  num_setups: 5
+  watchlist_min_confluence: 70
+  # possibly email settings if we email the report
+This config is comprehensive. A few things to note:
+
+•	The data section chooses Postgres and provides connection details. In a container, these might be environment variables instead.
+•	Universe discovery is set to find all USDT or USD pairs from exchanges, then possibly trim to top 100 by volume. This, combined with the liquidity filter, ensures we focus on liquid markets.
+•	The thresholds and scoring parts translate the earlier logic into concrete values. For example, adx_trend_threshold: 25 is used in features and patterns as a cutoff for a strong trend.
+•	We explicitly specify weights for each market regime to emphasize that different regimes prioritize different factors.
+•	Pattern settings have their thresholds so we can easily adjust how strict a breakout or squeeze trigger is.
+•	Alerts are configured with the Telegram bot credentials and a toggle for each pattern type.
+•	Schedule indicates this runs daily at 00:00 (could be interpreted by an external scheduler or by the app itself using sleep/cron).
+•	The report section controls how many items to show to keep the report concise, and defines the watchlist threshold.
+
+
+No magic numbers exist in code; everything is drawn from this config. If we want to change the definition of “strong RS” from 70 to 80, or require higher volume for breakouts, we just edit here.
+
+
+10. Example 
+main.py
+ Pipeline (Full Pseudocode)
+
+
+Finally, we outline the end-to-end execution flow of the scanner. This is the orchestrator that ties all components together for each run:
+# src/main.py
+import yaml
+from datetime import datetime
+from data import repository, exchange_api
+from features import trend, volatility, volume, relative_strength, positioning
+from scoring import trend_score, volume_score, volatility_score, rs_score, positioning_score, confluence
+from patterns import breakout, volatility_squeeze, pullback, divergence
+from ranking import filters, ranking
+from alerts import real_time
+from reports import daily_report
+
+def main():
+    # 1. Load configuration
+    config = yaml.safe_load(open("config.yaml"))
+    
+    # 2. Initialize data repository (and exchange API if needed)
+    if config['data']['storage'] == "postgres":
+        data_repo = repository.PostgresRepository(config['data']['postgres'])
+    else:
+        data_repo = repository.FileRepository(config['data'])  # e.g., CSV files
+    
+    # (The PostgresRepository could internally initialize a CCXT exchange client for fetching if needed)
+    # Alternatively, we might do:
+    # exchange_client = exchange_api.CCXTExchange(config['exchanges'])
+    # data_repo = repository.PostgresRepository(db_config, exchange_client)
+    
+    # 3. Discover or load symbol universe
+    if config['universe']['mode'] == "discover":
+        symbols = data_repo.discover_universe(config['universe']['discover'])
+    else:
+        # static mode: load from config list
+        symbols = []
+        for sym_info in config['universe']['symbols']:
+            symbols.append(SymbolMeta(**sym_info))
+    # If a watchlist is provided (for filtering or marking), it is in config['universe']['watchlist']
+    
+    # 4. Apply initial filters on universe (e.g., liquidity based on prior data)
+    # We might remove illiquid symbols right away if we have volume info from discovery
+    symbols = [s for s in symbols if filters.pass_liquidity(s, config)]
+    # (If liquidity info is not available until after fetching data, we will filter later.)
+    
+    # 5. Fetch market-wide data and compute market health/regime
+    # For example, get BTC and perhaps other majors for breadth calculation:
+    market_symbols = symbols.copy()
+    # Ensure BTC or major index is included for regime calc:
+    btc_symbol = next((s for s in symbols if s.base_asset in ["BTC", "BTC"] and s.quote_asset in ["USD","USDT"]), None)
+    if not btc_symbol:
+        # If BTC not in universe, add it separately for context
+        btc_symbol = SymbolMeta(symbol="BTC/USDT", base_asset="BTC", quote_asset="USDT", exchange="binance", is_perpetual=True)
+        market_symbols.append(btc_symbol)
+    # Fetch recent bars for all market_symbols (could limit to needed ones in market_health)
+    recent_bars = {}
+    for sym in market_symbols:
+        bars = data_repo.fetch_ohlcv(sym, timeframe=config['timeframes']['primary'], 
+                                     start=None, end=datetime.utcnow())
+        # (start=None meaning use default window, maybe last 200 days)
+        recent_bars[sym.symbol] = bars
+    market_health = data_repo.compute_market_health(market_symbols, recent_bars)
+    regime = market_health.regime
+    
+    # 6. Iterate over each symbol to compute features, scores, and detect patterns
+    results = []  # will hold results for each symbol (symbol, score_bundle, pattern_signals, etc.)
+    for sym in symbols:
+        bars = recent_bars.get(sym.symbol)
+        if not bars or len(bars) < 10:
+            continue  # skip if not enough data
+        # Compute features
+        trend_feats = trend.compute_trend_features(bars, config['trend'])       # assume these functions return dicts of feature values
+        vol_feats = volatility.compute_volatility_features(bars, config['volatility'])
+        volu_feats = volume.compute_volume_features(bars, config['volume'])
+        rs_feats = relative_strength.compute_rs_features(sym, bars, symbols, config['relative_strength'])
+        # For positioning, fetch latest derivative metrics if applicable
+        deriv_metrics = []
+        if sym.is_perpetual:
+            deriv_metrics = data_repo.fetch_derivatives_metrics(sym, start=None, end=datetime.utcnow())
+        pos_feats = positioning.compute_positioning_features(sym, deriv_metrics)
+        
+        # Compute component scores
+        trend_score_val = trend_score.compute_trend_score(trend_feats, config['scoring']['trend'])
+        volume_score_val = volume_score.compute_volume_score(volu_feats, config['scoring']['volume'])
+        volatility_score_val = volatility_score.compute_volatility_score(vol_feats, config['scoring']['volatility'])
+        rs_score_val = rs_score.compute_relative_strength_score(rs_feats, config['scoring']['relative_strength'])
+        positioning_score_val = positioning_score.compute_positioning_score(pos_feats, config['scoring']['positioning'])
+        score_bundle = ScoreBundle(trend=trend_score_val, volume=volume_score_val,
+                                   volatility=volatility_score_val, relative_strength=rs_score_val,
+                                   positioning=positioning_score_val)
+        confluence_val, confidence_val = confluence.compute_confluence_score(score_bundle, regime, config['scoring'])
+        score_bundle.confluence = confluence_val
+        score_bundle.confidence = confidence_val
+        
+        # Pattern detection
+        pattern_signals = []
+        sig = breakout.detect_breakout(sym, bars, score_bundle, config['patterns'])
+        if sig: pattern_signals.append(sig)
+        sig = volatility_squeeze.detect_volatility_squeeze(sym, bars, vol_feats, score_bundle, config['patterns'])
+        if sig: pattern_signals.append(sig)
+        sig = pullback.detect_holy_grail_pullback(sym, bars, {**trend_feats, **vol_feats}, score_bundle, config['patterns'])
+        if sig: pattern_signals.append(sig)
+        # RSI values needed for divergence detection (compute RSI from bars)
+        rsi_list = trend.compute_rsi_values(bars, period=14) if hasattr(trend, "compute_rsi_values") else [] 
+        if rsi_list:
+            sig = divergence.detect_rsi_divergence(sym, bars, rsi_list, score_bundle, config['patterns'])
+            if sig: pattern_signals.append(sig)
+        
+        # Apply per-symbol filters
+        if not filters.pass_liquidity(sym, config):
+            continue
+        if not filters.pass_feasibility(sym, bars, config):
+            continue
+        
+        results.append({
+            "symbol": sym.symbol,
+            "symbol_meta": sym,
+            "score_bundle": score_bundle,
+            "pattern_signals": pattern_signals,
+            "bars": bars  # include bars if needed for further analysis
+        })
+    # end for each symbol
+    
+    # 7. Ranking and selection of top opportunities
+    leaderboards = ranking.compile_leaderboards(results, config)
+    top_confluence_list = leaderboards["top_confluence"]
+    top_rs_list = leaderboards["top_relative_strength"]
+    volume_surge_list = leaderboards["volume_surge"]
+    squeeze_list = leaderboards["volatility_squeeze"]
+    breakout_list = leaderboards["breakouts"]
+    
+    # 8. Send real-time alerts for immediate patterns of interest
+    for res in results:
+        for sig in res["pattern_signals"]:
+            pattern_type = sig["pattern"]
+            if config['alerts']['signals'].get(pattern_type.lower(), False):
+                real_time.notify_signal(sig, config)
+    
+    # 9. Generate end-of-day report
+    report_md = daily_report.generate_daily_report(market_health, leaderboards, results, config)
+    # Send or save the report
+    if config['alerts']['telegram'].get('enabled', True):
+        # If the report is short enough, send via Telegram; else perhaps send a summary or file.
+        real_time.send_telegram_alert(report_md, config)
+    # Optionally, save report to DB or disk
+    data_repo.save_report(report_md)
+    
+    # 10. Persist scores and signals to database for record
+    data_repo.save_scores([(res["symbol"], res["score_bundle"], datetime.utcnow()) for res in results])
+    # Save signals (pattern_signals might contain multiple signals per symbol)
+    signals_to_save = []
+    for res in results:
+        for sig in res["pattern_signals"]:
+            signals_to_save.append({
+                "symbol": sig["symbol"],
+                "pattern": sig["pattern"],
+                "timestamp": datetime.utcnow(),
+                "details": sig  # could be JSON field in DB
+            })
+    data_repo.save_signals(signals_to_save)
+Let’s break down the pipeline steps:
+
+1.	Load config: Using yaml.safe_load. In a real scenario, handle file paths, environment overrides, etc.
+2.	Initialize data repository: We choose Postgres or File based on config. If Postgres, instantiate PostgresRepository with connection info. This repository may internally also prepare an exchange API client if needed for missing data. The separation of concerns is that main doesn’t directly use CCXT; it goes through repository for data.
+3.	Discover universe: If discover mode, call the repository’s method with parameters (like quote_assets and top_n from config). If static, read from config and create SymbolMeta objects accordingly. We now have a list of symbols (with meta including if they are perpetual, etc., presumably set by repository or by static config data).
+4.	Initial filters: We apply the liquidity filter on the universe list if possible. If discover_universe returned volume info or if symbol has daily volume attribute, we use it. If not, we might skip filtering here and rely on later filtering after we fetch bars (some volume info might be derivable from bars as well, like last day’s volume in bars).
+5.	Market health computation: We ensure BTC is included (if not already). We fetch OHLCV data for relevant symbols. Possibly we limit to needed range for computing trend & breadth (maybe last 200 days). Compute MarketHealth by calling repository’s method. The repository might itself use the BTC data and others to return the MarketHealth object. We could also compute market health here using features: e.g., compute BTC’s trend score or if BTC’s close > MA200, etc., and breadth = fraction of symbols with trend_score > 50, then decide regime. (Either approach is fine; we designed repository to handle it for encapsulation.)
+6.	Symbol loop: For each symbol:
+
+◦	Get its bars (fetched above or fetch now if not done globally).
+◦	Compute features by calling our feature functions. Here I assumed combined functions like compute_trend_features that return a dict of all trend-related features at once. (We might implement those by internally calling the individual ones defined earlier.)
+◦	Compute RS features: this might need data of other symbols. Perhaps compute_rs_features(sym, bars, universe, config) handles fetching or using precomputed returns for all symbols. Alternatively, we could precompute all returns and ranks outside the loop for efficiency. For simplicity, you might compute the universe returns once:
+
+▪	e.g. returns_1m = {sym: compute_period_return(bars[sym], 20) for sym in symbols} etc., and then inside loop just pick from that and compute ranks. But in pseudocode we call function that likely does that internally.
+◦	
+◦	Compute positioning features using derivative metrics if applicable. We fetch derivative data if needed (since some symbols might not need it, we do on demand).
+◦	Compute scores using scoring functions, passing in the relevant part of config (we structured config so that e.g. config['scoring']['trend'] has needed parameters).
+◦	Compute confluence and confidence from those scores and the regime.
+◦	Pattern detection: We call each detection function with necessary data:
+
+▪	For breakout, we pass symbol meta, its bars, and scores.
+▪	For squeeze, we pass also vol_feats if needed.
+▪	For pullback, we might need both trend and volatility data (like ADX from trend_feats, EMA from trend, etc., and maybe vol for ATR but primarily ADX and EMA).
+▪	For divergence, we need RSI values; we might compute RSI here (perhaps the trend module has an RSI function or we quickly compute it).
+◦	
+◦	Each detect returns either None or a signal dict. We collect them in pattern_signals.
+◦	Apply filters: If a symbol fails liquidity now (perhaps volumes are known after fetching bars) or fails feasibility (we compute swing low from bars and check stop distance), we continue (skip adding results for that symbol).
+◦	If passed, we append the results for that symbol, storing symbol, the ScoreBundle, any pattern signals, and maybe the bars for reference.
+7.	
+8.	Ranking and leaderboards: We call compile_leaderboards(results, config) which returns the sorted lists (top_confluence, top_rs, etc., as we described). We can then use them for reporting or further logic.
+9.	Alerts: For each symbol’s pattern signals, if the config says that pattern is alertable, we send it. We lowercase the pattern name or otherwise map it to config keys (ensuring e.g. “breakout” matches config ‘signals.breakout’: true). Each signal we pass to real_time.notify_signal, which handles formatting and sending to Telegram and/or webhook.
+We do this inside the loop or after collecting all signals. Doing it after might be better if we want to ensure data is complete, but since each signal is independent, we can alert as we find them. However, doing it after the loop (like we wrote) ensures all computations are done (slightly safer if heavy computations are ongoing – we might not want to send an alert until the whole process is nearly done). But either is fine in batch context.
+10.	Daily Report: We generate a markdown report by calling generate_daily_report with the computed market_health, leaderboards, the results list, and config. It returns a markdown string.
+
+◦	We then send it. If it’s small enough, Telegram can send it as a message (Telegram supports messages up to a certain length; if it’s long, might need splitting or sending as a document or link). For Slack webhook, we could also post it (Slack has message length limits too).
+◦	Alternatively, we might email it if configured (the config didn’t show email, but could be extended).
+◦	We also call data_repo.save_report(report_md) to store it, e.g., in a reports table or a file.
+11.	
+12.	Persist scores and signals: We prepare data to save:
+
+◦	save_scores: we iterate results and for each, take symbol, scores, maybe date. The repository can map ScoreBundle fields to columns in a table for historical record. (We might also store regime or other context if needed.)
+◦	save_signals: we flatten all signals and store them. Each signal entry might include symbol, pattern, timestamp, maybe store the confluence score or reason text.
+◦	This allows us to later analyze how many signals triggered, and do backtesting by querying these tables rather than recomputing everything.
+◦	Logging: The repository could also log runtime info (like how long it took, any errors, etc., either in a log file or DB).
+13.	
+
+
+No Hardcoding: Notice all thresholds (like pivot lookback 20, rvol 1.5, score cutoffs) came from config (accessed via config[...]). The code itself uses no magic constants, fulfilling the requirement that the model can be tweaked via config alone.
+
+Scheduling: We assume main() is invoked by an external schedule. For example, a cron job might run python scripts/run_scan.py every day at 00:05. That script simply calls main(). Because each run is independent (data is fetched fresh or from DB, and results saved), the system is stateless between runs except for the stored data. This stateless design (no reliance on in-memory persistence beyond one run) suits container deployment.
+
+Extensibility: If we want to extend to equities:
+
+•	We could add another exchange in config (say alpaca or yahoo for data) and update discover_universe logic accordingly.
+•	SymbolMeta might have sector or country fields for stocks if needed. The scoring might adjust weights (via config) to maybe ignore funding metrics (positioning weight zero for equities regime).
+•	Patterns remain similar (breakouts, squeezes apply to stocks too). We might add new ones (like earnings gaps etc.) later by adding modules under patterns without touching core pipeline.
+•	The database repository can handle storing stocks OHLC as well, as long as they’re ingested similarly.
+
+
+This architecture provides a clear separation of concerns, making it maintainable and scalable:
+
+•	If tomorrow we want to add a new scoring factor (say “momentum score” or an AI-based score), we add a new component and adjust Confluence weighting without affecting other parts.
+•	If we want to plug in a different data source (say a different DB or an API), implementing the repository interface is all that’s needed.
+•	If we refine a pattern’s logic, we do so in its module without breaking others.
+
+
+In summary, the main.py pseudocode ties together configuration, data retrieval, feature calculation, scoring, pattern detection, filtering, ranking, and output (alerts & report). All thresholds and formulas come from config.yaml, ensuring the system is fully tunable. Each step’s output feeds into the next in a clean way:
+
+•	Data -> Features -> Scores -> Signals -> Filter/Rank -> Alert/Report -> Persist.
+

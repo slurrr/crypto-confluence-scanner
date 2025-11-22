@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class FilterConfig:
@@ -81,6 +84,11 @@ def apply_filters(
 
     Returns only those that pass.
     """
+    logger.info(
+        "[filters] received %d symbols", 
+        len(symbols)
+    )
+
     cfg = parse_filter_config(raw_cfg)
     kept: List[Any] = []
 
@@ -93,5 +101,8 @@ def apply_filters(
             # Example:
             # print(f"[FILTER] Dropping {s.symbol}: {', '.join(reasons)}")
             pass
-
+    logger.info(
+        "[filters] %d symbols passed filters, %d dropped",
+        len(kept),
+    )
     return kept

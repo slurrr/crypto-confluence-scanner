@@ -16,7 +16,7 @@ universe:
     - LTC/USDT
 
 ranking:
-  max_symbols: 20   # cap how many symbols you scan per run
+  max_symbols: 10   # cap how many symbols you scan per run
 
 #filters:
 #  min_trend_score: 25        # require at least moderate trend quality

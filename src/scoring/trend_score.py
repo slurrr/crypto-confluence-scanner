@@ -119,7 +119,7 @@ def compute_trend_score(features: Dict[str, float]) -> TrendScoreResult:
         + w_dist * s_dist
         + w_slope * s_slope
     )
-
+    
     debug_features: Dict[str, float] = {
         # raw inputs
         "trend_ma_alignment": ma_align,
@@ -132,7 +132,7 @@ def compute_trend_score(features: Dict[str, float]) -> TrendScoreResult:
         "trend_distance_from_ma_score": s_dist,
         "trend_ma_slope_score": s_slope,
     }
-
+    #print(debug_features)
     return TrendScoreResult(score=_clamp(score), features=debug_features)
 
 

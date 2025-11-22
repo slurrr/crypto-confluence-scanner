@@ -73,8 +73,8 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
         "rs_score": _as_float(s_rs),
         "positioning_score": _as_float(s_positioning),
     }
-    print("DEBUG raw positioning:", s_positioning)
-    print("DEBUG positioning_score float:", _as_float(s_positioning))
+    #print("DEBUG raw positioning:", s_positioning)
+    #print("DEBUG positioning_score float:", _as_float(s_positioning))
 
     return scores
 
@@ -187,6 +187,7 @@ def compile_score_bundles_for_universe(
             weights=weights,
         )
         # DEBUG: show positioning inputs
+        '''
         if symbol == symbols[0]:  # just one symbol to avoid spam
             print(
                 "DEBUG positioning for", symbol,
@@ -197,6 +198,7 @@ def compile_score_bundles_for_universe(
                 "has_deriv=",
                 bundle.features.get("positioning_has_derivatives_data"),
             )
+        '''
         bundles.append(bundle)
 
     return bundles
