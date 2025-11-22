@@ -114,3 +114,4 @@ alerts:
   discord:
     enabled: false
     webhook_url: "https://discord.com/api/webhooks/XXX/YYY"
+

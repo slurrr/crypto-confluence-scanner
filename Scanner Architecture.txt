@@ -2135,4 +2135,3 @@ This architecture provides a clear separation of concerns, making it maintainabl
 In summary, the main.py pseudocode ties together configuration, data retrieval, feature calculation, scoring, pattern detection, filtering, ranking, and output (alerts & report). All thresholds and formulas come from config.yaml, ensuring the system is fully tunable. Each step’s output feeds into the next in a clean way:
 
 •	Data -> Features -> Scores -> Signals -> Filter/Rank -> Alert/Report -> Persist.
-
