@@ -530,3 +530,4 @@ As long as this spec stays aligned with the repo, every future chat has a solid 
 ---
 
 _End of `PROJECT_SPEC.md`_
+

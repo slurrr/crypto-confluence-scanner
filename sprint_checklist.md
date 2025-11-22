@@ -71,9 +71,9 @@ This checklist is structured to drop directly into your repo (e.g., `PROJECT_SPR
 - [ x ] Compute all features
 - [ x ] Compute all component scores
 - [ x ] Compute confluence score
-- [ ] Run pattern detection
+- [  ] Run pattern detection
 - [ x ] Assemble `ScoreBundle`
-- [ ] Collect results for ranking/reporting/alerts
+- [  ] Collect results for ranking/reporting/alerts
 
 ### **3.3 Ranking & Filtering (`src/ranking/`)**
 - [ ] Ensure `filters.py` applies liquidity & feasibility filters
