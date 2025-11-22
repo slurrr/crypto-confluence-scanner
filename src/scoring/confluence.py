@@ -49,11 +49,16 @@ class ConfluenceScoreResult:
     component_scores:
         The component scores that were fed into the computation
         (typically ScoreBundle.scores).
+
+    confidence:
+        Fraction of configured weight that was actually present (0�?"1).
+        Lower when some components are missing.
     """
     confluence_score: float
     regime: Optional[str]
     weights: Dict[str, float]
     component_scores: Dict[str, float]
+    confidence: float
 
 
 # ---------------------------------------------------------------------------
@@ -223,12 +228,19 @@ def compute_confluence_score(
             regime=regime,
             weights={},
             component_scores=working_scores,
+            confidence=0.0,
         )
 
     num = 0.0
-    denom = 0.0
+    used_weight = 0.0
+    total_weight = 0.0
 
     for name, w in effective_weights.items():
+        try:
+            w_float = float(w)
+        except (TypeError, ValueError):
+            continue
+        total_weight += w_float
         value = working_scores.get(name)
         if value is None:
             continue
@@ -236,10 +248,10 @@ def compute_confluence_score(
             v = float(value)
         except (TypeError, ValueError):
             continue
-        num += w * v
-        denom += w
+        num += w_float * v
+        used_weight += w_float
 
-    c = num / denom if denom else 0.0
+    c = num / used_weight if used_weight else 0.0
 
     # Clamp into [0, 100]
     if c < 0.0:
@@ -252,4 +264,5 @@ def compute_confluence_score(
         regime=regime,
         weights=effective_weights,
         component_scores=working_scores,
+        confidence=(used_weight / total_weight) if total_weight else 0.0,
     )
