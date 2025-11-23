@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Sequence
 
-from ..ranking.ranking import rank_universe, RankedSymbol
-from ..data.models import MarketHealth
+from ..data.models import MarketHealth, ScoreBundle
+from ..pipeline.score_pipeline import compile_score_bundles_for_universe
+from ..ranking.ranking import RankingOutput, rank_score_bundles
+from ..scoring.regimes import classify_regime
 
 log = logging.getLogger(__name__)
 
@@ -20,33 +22,23 @@ def _fmt_num(x: Any, nd: int = 2) -> str:
         return str(x)
 
 
-def _extract_extras(r: RankedSymbol) -> Dict[str, float]:
-    """
-    Pull out a few useful raw metrics for the report from the
-    component feature dicts.
-    """
-    vol_feats = r.volatility.features or {}
-    rs_feats = r.rs.features or {}
-
+def _extract_extras(bundle: ScoreBundle) -> Dict[str, float]:
+    features = bundle.features or {}
     return {
-        "atr_pct": vol_feats.get("atr_pct_raw"),
-        "bb_width_pct": vol_feats.get("bb_width_pct_raw"),
-        "ret_1m": rs_feats.get("ret_20_raw"),
-        "ret_3m": rs_feats.get("ret_60_raw"),
-        "ret_6m": rs_feats.get("ret_120_raw"),
+        "atr_pct": features.get("volatility_atr_pct_14"),
+        "bb_width_pct": features.get("volatility_bb_width_pct_20"),
+        "ret_1m": features.get("rs_ret_20_pct"),
+        "ret_3m": features.get("rs_ret_60_pct"),
+        "ret_6m": features.get("rs_ret_120_pct"),
     }
 
 
 def format_console_table(
-    ranked: List[RankedSymbol],
+    ranked: Sequence[ScoreBundle],
     market_health: Optional[MarketHealth] = None,
 ) -> str:
-    """
-    Build a visually nice, monospaced table for the terminal.
-    """
-    lines: List[str] = []
+    lines: list[str] = []
 
-    # Market regime header
     if market_health is not None:
         lines.append(
             f"Market Regime: {market_health.regime.upper()} "
@@ -63,19 +55,19 @@ def format_console_table(
     lines.append(header)
     lines.append(sep)
 
-    for idx, r in enumerate(ranked, start=1):
-        comps = r.confluence.components
-        extras = _extract_extras(r)
+    for idx, bundle in enumerate(ranked, start=1):
+        scores = bundle.scores or {}
+        extras = _extract_extras(bundle)
 
         line = (
             f"{idx:>4}  "
-            f"{r.symbol:<10}  "
-            f"{_fmt_num(r.confluence.confluence_score, 1):>5}  "
-            f"{_fmt_num(comps.trend, 1):>7}  "
-            f"{_fmt_num(comps.volatility, 1):>5}  "
-            f"{_fmt_num(comps.volume, 1):>5}  "
-            f"{_fmt_num(comps.rs, 1):>6}  "
-            f"{_fmt_num(comps.positioning, 1):>6}  "
+            f"{bundle.symbol:<10}  "
+            f"{_fmt_num(bundle.confluence_score, 1):>5}  "
+            f"{_fmt_num(scores.get('trend_score'), 1):>7}  "
+            f"{_fmt_num(scores.get('volatility_score'), 1):>5}  "
+            f"{_fmt_num(scores.get('volume_score'), 1):>5}  "
+            f"{_fmt_num(scores.get('rs_score'), 1):>6}  "
+            f"{_fmt_num(scores.get('positioning_score'), 1):>6}  "
             f"{_fmt_num(extras['atr_pct'], 1):>6}  "
             f"{_fmt_num(extras['bb_width_pct'], 1):>6}  "
             f"{_fmt_num(extras['ret_1m'], 1):>6}  "
@@ -89,22 +81,21 @@ def format_console_table(
 
 
 def build_markdown_report(
-    ranked: List[RankedSymbol],
+    ranked: Sequence[ScoreBundle],
     cfg: Dict[str, Any],
     run_dt: datetime,
     market_health: Optional[MarketHealth] = None,
 ) -> str:
-    """
-    Build a visually clean Markdown report for the top N symbols.
-    """
-    timeframe = cfg.get("timeframes", ["1d"])[0]
+    timeframes = cfg.get("data_repository", {}).get(
+        "timeframes", cfg.get("timeframes", ["1d"])
+    )
+    timeframe = timeframes[0] if timeframes else "1d"
     exchange_id = cfg.get("exchange", {}).get("id", "unknown")
     top_n = len(ranked)
 
-    lines: List[str] = []
+    lines: list[str] = []
 
-    # Title + meta
-    lines.append("# 📊 Daily Confluence Report")
+    lines.append("# Daily Confluence Report")
     lines.append("")
     lines.append(f"**Date:** {run_dt.strftime('%Y-%m-%d %H:%M UTC')}  ")
     lines.append(f"**Timeframe:** {timeframe}  ")
@@ -112,9 +103,8 @@ def build_markdown_report(
     lines.append(f"**Top Symbols:** {top_n}")
     lines.append("")
 
-    # Market regime section
     if market_health is not None:
-        lines.append("## 🧭 Market Regime")
+        lines.append("## Market Regime")
         lines.append("")
         lines.append(f"- **Regime:** **{market_health.regime.upper()}**")
         lines.append(
@@ -127,11 +117,10 @@ def build_markdown_report(
     lines.append("---")
     lines.append("")
 
-    # Legend
     lines.append("**Legend**")
     lines.append("")
-    lines.append("- **CS** = Confluence Score (0–100)")
-    lines.append("- **Trend / Vol / Volu / RS / Pos** = component scores (0–100)")
+    lines.append("- **CS** = Confluence Score (0-100)")
+    lines.append("- **Trend / Vol / Volu / RS / Pos** = component scores (0-100)")
     lines.append("- **ATR%** = ATR(14) as % of price")
     lines.append("- **BBW%** = Bollinger Band width as % of mid")
     lines.append("- **1M/3M/6M%** = approximate returns over 20/60/120 bars")
@@ -139,7 +128,6 @@ def build_markdown_report(
     lines.append("---")
     lines.append("")
 
-    # Table header
     lines.append(
         "| # | Symbol | CS | Trend | Vol | Volu | RS | Pos | ATR% | BBW% | 1M% | 3M% | 6M% |"
     )
@@ -147,19 +135,19 @@ def build_markdown_report(
         "|:-:|:------:|:--:|:-----:|:---:|:----:|:--:|:---:|:----:|:----:|:---:|:---:|:---:|"
     )
 
-    for idx, r in enumerate(ranked, start=1):
-        comps = r.confluence.components
-        extras = _extract_extras(r)
+    for idx, bundle in enumerate(ranked, start=1):
+        scores = bundle.scores or {}
+        extras = _extract_extras(bundle)
 
         row = (
             f"| {idx} "
-            f"| {r.symbol} "
-            f"| {_fmt_num(r.confluence.confluence_score, 1)} "
-            f"| {_fmt_num(comps.trend, 1)} "
-            f"| {_fmt_num(comps.volatility, 1)} "
-            f"| {_fmt_num(comps.volume, 1)} "
-            f"| {_fmt_num(comps.rs, 1)} "
-            f"| {_fmt_num(comps.positioning, 1)} "
+            f"| {bundle.symbol} "
+            f"| {_fmt_num(bundle.confluence_score, 1)} "
+            f"| {_fmt_num(scores.get('trend_score'), 1)} "
+            f"| {_fmt_num(scores.get('volatility_score'), 1)} "
+            f"| {_fmt_num(scores.get('volume_score'), 1)} "
+            f"| {_fmt_num(scores.get('rs_score'), 1)} "
+            f"| {_fmt_num(scores.get('positioning_score'), 1)} "
             f"| {_fmt_num(extras['atr_pct'], 1)} "
             f"| {_fmt_num(extras['bb_width_pct'], 1)} "
             f"| {_fmt_num(extras['ret_1m'], 1)} "
@@ -176,19 +164,15 @@ def build_markdown_report(
 
 
 def write_markdown_report(
-    ranked: List[RankedSymbol],
+    ranked: Sequence[ScoreBundle],
     cfg: Dict[str, Any],
     run_dt: datetime,
     market_health: Optional[MarketHealth],
     output_dir: str | Path = "reports",
 ) -> Path:
-    """
-    Write the markdown report to disk and return the path.
-    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Timestamped filename so you keep every run
     fname = f"daily_report_{run_dt.strftime('%Y-%m-%d_%H-%M')}.md"
     out_path = output_dir / fname
 
@@ -201,34 +185,61 @@ def write_markdown_report(
 def generate_daily_report(
     repo,
     cfg: Dict[str, Any],
+    *,
+    ranking_output: RankingOutput | None = None,
+    ranked_bundles: Sequence[ScoreBundle] | None = None,
+    market_health: Optional[MarketHealth] = None,
 ) -> None:
-    """
-    Full daily report pipeline:
-
-    - compute market health / regime
-    - run ranking (with filters)
-    - print a nice console table
-    - write a markdown file
-    """
     run_dt = datetime.utcnow()
     reports_cfg = cfg.get("reports", {})
     top_n = int(reports_cfg.get("top_n", 10))
     output_dir = reports_cfg.get("output_dir", "reports")
 
-    # 🧭 Market health / regime from repository
-    market_health = repo.compute_market_health()
+    if market_health is None:
+        market_health = repo.compute_market_health()
+    regime = classify_regime(market_health, cfg.get("regimes", {}))
 
-    ranked = rank_universe(repo, cfg, top_n=top_n)
+    if ranking_output is None:
+        if ranked_bundles is None:
+            timeframes = cfg.get("data_repository", {}).get("timeframes", ["1d"])
+            timeframe = timeframes[0]
+
+            universe = repo.discover_universe()
+            max_symbols = (
+                cfg.get("ranking", {}).get("max_symbols")
+                or cfg.get("data_repository", {}).get("max_symbols")
+            )
+            if max_symbols:
+                universe = universe[:max_symbols]
+
+            symbols = [u.symbol for u in universe]
+            derivatives_by_symbol = repo.fetch_derivatives_for_symbols(symbols)
+
+            ranked_bundles = compile_score_bundles_for_universe(
+                repo=repo,
+                symbols=symbols,
+                timeframe=timeframe,
+                cfg=cfg,
+                regime=regime,
+                derivatives_by_symbol=derivatives_by_symbol,
+            )
+
+        ranking_output = rank_score_bundles(
+            ranked_bundles,
+            cfg,
+            top_n=top_n,
+            apply_filtering=True,
+        )
+
+    ranked = list(ranking_output.leaderboards.get("top_confluence", []))[:top_n]
 
     if not ranked:
         log.warning("No symbols passed filters / ranking for daily report.")
         return
 
-    # Console table
     table = format_console_table(ranked, market_health)
     print("\n" + table + "\n")
 
-    # Markdown file
     out_path = write_markdown_report(
         ranked,
         cfg,

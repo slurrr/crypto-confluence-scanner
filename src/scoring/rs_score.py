@@ -9,6 +9,20 @@ from ..features.relative_strength import compute_rs_features
 
 FeatureDict = Dict[str, float]
 
+RANK_WEIGHTS: Dict[str, float] = {
+    # Slightly overweight recent (20) while keeping 60/120 in the mix.
+    "rs_20_rank_pct": 0.45,
+    "rs_60_rank_pct": 0.35,
+    "rs_120_rank_pct": 0.20,
+}
+
+# Fallback weights when only raw returns are available.
+RETURN_WEIGHTS: Dict[str, float] = {
+    "rs_ret_20_pct": 0.45,
+    "rs_ret_60_pct": 0.35,
+    "rs_ret_120_pct": 0.20,
+}
+
 
 @dataclass
 class RelativeStrengthScoreResult:
@@ -53,7 +67,12 @@ def compute_relative_strength_score(
 
     Input:
         features:
-            dict from `compute_rs_features(...)`, expected keys:
+            dict from `compute_rs_features(...)`.
+            Preferred keys (cross-sectional):
+              - rs_20_rank_pct
+              - rs_60_rank_pct
+              - rs_120_rank_pct
+            Fallback keys (single-asset):
               - rs_ret_20_pct
               - rs_ret_60_pct
               - rs_ret_120_pct
@@ -67,34 +86,56 @@ def compute_relative_strength_score(
         # Too little data; neutral-ish, empty features.
         return RelativeStrengthScoreResult(score=50.0, features={})
 
-    ret_20 = features["rs_ret_20_pct"]
-    ret_60 = features["rs_ret_60_pct"]
-    ret_120 = features["rs_ret_120_pct"]
+    debug_features: Dict[str, float] = {}
 
-    s_20 = _return_score(ret_20)
-    s_60 = _return_score(ret_60)
-    s_120 = _return_score(ret_120)
+    # First preference: cross-sectional percentile ranks.
+    num = 0.0
+    den = 0.0
+    for key, weight in RANK_WEIGHTS.items():
+        val = features.get(key)
+        if val is None:
+            continue
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            continue
+        num += weight * v
+        den += weight
+        debug_features[key] = v
 
-    # You can tune these weights later; for now:
-    # slightly more emphasis on 3M/6M.
-    w_20 = 0.25
-    w_60 = 0.35
-    w_120 = 0.40
+    source = "percentile" if den > 0 else "returns_fallback"
 
-    score = w_20 * s_20 + w_60 * s_60 + w_120 * s_120
+    # Fallback: map raw returns to scores if no percentile ranks available.
+    if den == 0.0:
+        for key, weight in RETURN_WEIGHTS.items():
+            val = features.get(key)
+            if val is None:
+                continue
+            try:
+                v = float(val)
+            except (TypeError, ValueError):
+                continue
+            comp = _return_score(v)
+            num += weight * comp
+            den += weight
+            debug_features[key] = v
+            debug_features[f"{key}_score"] = comp
 
-    debug_features: Dict[str, float] = {
-        # raw returns
-        "rs_ret_20_pct": ret_20,
-        "rs_ret_60_pct": ret_60,
-        "rs_ret_120_pct": ret_120,
-        # component scores
-        "rs_ret_20_score": s_20,
-        "rs_ret_60_score": s_60,
-        "rs_ret_120_score": s_120,
-    }
-    #print(debug_features)
-    return RelativeStrengthScoreResult(score=_clamp(score), features=debug_features)
+    # Preserve raw returns in debug output if available.
+    for key in RETURN_WEIGHTS:
+        if key in features and key not in debug_features:
+            try:
+                debug_features[key] = float(features[key])
+            except (TypeError, ValueError):
+                pass
+
+    if den == 0.0:
+        # Still nothing usable; keep neutral.
+        return RelativeStrengthScoreResult(score=50.0, features=debug_features)
+
+    score = _clamp(num / den)
+    debug_features["rs_score_source"] = source
+    return RelativeStrengthScoreResult(score=score, features=debug_features)
 
 
 def compute_relative_strength_score_from_bars(

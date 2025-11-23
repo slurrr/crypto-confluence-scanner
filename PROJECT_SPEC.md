@@ -167,7 +167,7 @@ universe:
     - LTC/USDT
 
 ranking:
-  max_symbols: 20   # cap how many symbols you scan per run
+  max_symbols: 20   # cap how many symbols you rank per run
 
 #filters:
 #  min_trend_score: 25        # require at least moderate trend quality
@@ -276,7 +276,7 @@ Logically, the config is interpreted as:
   - `id` – CCXT exchange id (here `"binance"`).
   - `symbols` – explicit list of spot symbols.
   - `derivatives.id` – CCXT id for futures/perps (here `"binanceusdm"`).
-- `ranking.max_symbols` – maximum number of symbols to include per scan.
+- `ranking.max_symbols` – maximum number of symbols to include in report per scan.
 - `reports.top_n` – how many ranked results to show in reports.
 - `reports.output_dir` – where to save markdown reports (matches `reports/` directory).
 - `alerts` – global alert configuration and thresholds:
@@ -399,7 +399,7 @@ Higher-level setup detection using scores + features:
   - Builds ranked lists (leaderboards), e.g.:
     - Top by Confluence Score.
     - Top by RS.
-    - Top squeezes, top breakouts, etc.
+    - Top patterns i.e. squeezes, top breakouts, etc.
 
 ### 5.6 `src/alerts/`
 

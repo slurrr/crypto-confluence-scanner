@@ -10,7 +10,10 @@ from ..data.repository import DataRepository
 from ..features.trend import compute_trend_features
 from ..features.volume import compute_volume_features
 from ..features.volatility import compute_volatility_features
-from ..features.relative_strength import compute_rs_features
+from ..features.relative_strength import (
+    compute_rs_features,
+    compute_universe_returns,
+)
 from ..features.positioning import compute_positioning_features
 
 from ..scoring.trend_score import compute_trend_score
@@ -31,12 +34,14 @@ from dataclasses import asdict
 def compute_all_features(
     bars: List[Any],
     *,
-    universe_returns: Optional[Any] = None,
+    universe_returns: Optional[Mapping[str, Mapping[str, float]]] = None,
     derivatives: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Run all feature modules and merge into a single flat dict.
     Assumes each feature function returns a dict with snake_case keys.
+    `universe_returns` should be a symbol->returns mapping computed once per run
+    so RS can be ranked cross-sectionally.
     """
 
     feat_trend = compute_trend_features(bars)
@@ -62,6 +67,22 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
     """
     Run all score modules and merge results into a single dict.
     """
+    REQUIRED_KEYS = [
+        "trend_ma_alignment",
+        "trend_persistence",
+        "trend_distance_from_ma_pct",
+        "trend_ma_slope_pct",
+        "volu_obv",
+        "vola_atr_pct",
+        "rs_rank_20",
+        "has_positioning_data",   # adjust to your field names
+    ]
+
+    # If ANY required features are missing, skip scoring entirely
+    for key in REQUIRED_KEYS:
+        if key not in features:
+            # Skip this symbol
+            return {}
 
     s_trend = compute_trend_score(features)
     s_volume = compute_volume_score(features)
@@ -100,7 +121,7 @@ def build_score_bundle_for_bars(
     timeframe: str,
     bars: List[Any],
     *,
-    universe_returns: Optional[Any] = None,
+    universe_returns: Optional[Mapping[str, Mapping[str, float]]] = None,
     derivatives: Optional[Any] = None,
     cfg: Optional[Mapping[str, Any]] = None,
     regime: Optional[str] = None,
@@ -157,7 +178,7 @@ def build_score_bundle_from_repo(
     symbol: str,
     timeframe: str,
     *,
-    universe_returns: Optional[Any] = None,
+    universe_returns: Optional[Mapping[str, Mapping[str, float]]] = None,
     derivatives: Optional[Any] = None,
     cfg: Optional[Mapping[str, Any]] = None,
     regime: Optional[str] = None,
@@ -185,7 +206,7 @@ def compile_score_bundles_for_universe(
     symbols: Iterable[str],
     timeframe: str,
     *,
-    universe_returns: Optional[Any] = None,
+    universe_returns: Optional[Mapping[str, Mapping[str, float]]] = None,
     derivatives_by_symbol: Optional[Dict[str, Any]] = None,
     cfg: Optional[Mapping[str, Any]] = None,
     regime: Optional[str] = None,
@@ -196,18 +217,28 @@ def compile_score_bundles_for_universe(
     a list of ScoreBundle objects.
     """
 
+    symbol_list = list(symbols)
     bundles: List[ScoreBundle] = []
 
-    for symbol in symbols:
+    # Fetch bars once so we can compute universe-level RS ranks without re-fetching.
+    bars_by_symbol: Dict[str, List[Any]] = {}
+    for symbol in symbol_list:
+        bars_by_symbol[symbol] = repo.fetch_ohlcv(symbol=symbol, timeframe=timeframe)
+
+    universe_ctx = universe_returns
+    if universe_ctx is None:
+        universe_ctx = compute_universe_returns(bars_by_symbol)
+
+    for symbol in symbol_list:
         derivatives = None
         if derivatives_by_symbol is not None:
             derivatives = derivatives_by_symbol.get(symbol)
 
-        bundle = build_score_bundle_from_repo(
-            repo=repo,
+        bundle = build_score_bundle_for_bars(
             symbol=symbol,
             timeframe=timeframe,
-            universe_returns=universe_returns,
+            bars=bars_by_symbol.get(symbol, []),
+            universe_returns=universe_ctx,
             derivatives=derivatives,
             cfg=cfg,
             regime=regime,

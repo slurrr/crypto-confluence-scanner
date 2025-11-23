@@ -5,8 +5,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Sequence
 
-from .data.models import DerivativesMetrics
-
 try:
     import yaml  # type: ignore
 except ImportError:
@@ -17,6 +15,8 @@ from .data.repository import DataRepository, DataRepositoryConfig
 from .pipeline.score_pipeline import compile_score_bundles_for_universe 
 from .data.market_health import compute_market_health
 from .scoring.regimes import classify_regime
+from .ranking.ranking import RankingOutput, rank_score_bundles
+from .reports.daily_report import generate_daily_report
 
 
 log = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ def build_repository(cfg: Dict[str, Any]) -> DataRepository:
 
 
 
-def run_scan(config_path: str = "config.yaml") -> None:
+def run_scan(config_path: str = "config.yaml") -> Dict[str, RankingOutput]:
     cfg = load_config(config_path)
     repo = build_repository(cfg)
 
@@ -84,10 +84,7 @@ def run_scan(config_path: str = "config.yaml") -> None:
     timeframes = cfg.get("data_repository", {}).get("timeframes", ["1d"])
 
     # Respect max_symbols (ranking.max_symbols wins, then data_repository.max_symbols)
-    max_symbols = (
-        cfg.get("ranking", {}).get("max_symbols")
-        or cfg.get("data_repository", {}).get("max_symbols")
-    )
+    max_symbols = (cfg.get("data_repository", {}).get("max_symbols"))
     if max_symbols:
         universe = universe[: max_symbols]
     
@@ -111,6 +108,8 @@ def run_scan(config_path: str = "config.yaml") -> None:
     regime = classify_regime(health, cfg.get("regimes", {}))
     log.info("Market regime: %s", regime)
 
+    results_by_timeframe: Dict[str, RankingOutput] = {}
+
     # 🔗 Call your pipeline
     for timeframe in timeframes:
         log.info("=== RUNNING TIMEFRAME: %s ===", timeframe)
@@ -129,18 +128,56 @@ def run_scan(config_path: str = "config.yaml") -> None:
             log.exception("Error while running timeframe %s: %s", timeframe, e)
             raise
 
-        # Sort bundles by confluence score (highest first)
-        bundles.sort(key=lambda b: b.confluence_score, reverse=True)
+        ranking_result = rank_score_bundles(
+            bundles,
+            cfg,
+            top_n=cfg.get("reports", {}).get("top_n"),
+            apply_filtering=True,
+        )
+        results_by_timeframe[timeframe] = ranking_result
 
-        for b in bundles:
-            logging.info(
+        filtered = ranking_result.filtered
+        log.info(
+            "Timeframe %s: kept %d/%d symbols after filters",
+            timeframe,
+            len(filtered),
+            len(bundles),
+        )
+
+        top_confluence = ranking_result.leaderboards.get("top_confluence", [])
+        if not top_confluence:
+            log.info("No symbols passed ranking for timeframe %s", timeframe)
+            continue
+
+        preview = top_confluence[: min(len(top_confluence), 5)]
+        log.info(
+            "Top symbols for %s: %s",
+            timeframe,
+            [b.symbol for b in preview],
+        )
+
+        for b in preview:
+            log.info(
                 "Score %s %s -> confluence=%.2f, confidence=%s scores=%s",
                 b.symbol,
                 b.timeframe,
                 b.confluence_score,
-                b.confluence_confidence,
+                b.confidence,
                 b.scores,
             )
+
+    if timeframes:
+        first_tf = timeframes[0]
+        first_output = results_by_timeframe.get(first_tf)
+        if first_output is not None:
+            generate_daily_report(
+                repo,
+                cfg,
+                ranking_output=first_output,
+                market_health=health,
+            )
+
+    return results_by_timeframe
 
 
 def main() -> None:

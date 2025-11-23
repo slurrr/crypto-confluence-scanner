@@ -97,13 +97,18 @@ def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
         )
     
     # If features are missing (e.g., not enough bars), return neutral.
-    if not features:
-        return TrendScoreResult(score=50.0, features={})
+    if features.get("has_trend__data", 0.0) < 1.0:
+        return TrendScoreResult(score=0.0, features={})
 
     ma_align = features["trend_ma_alignment"]
     persistence = features["trend_persistence"]
     dist_pct = features["trend_distance_from_ma_pct"]
     slope_pct = features["trend_ma_slope_pct"]
+
+    # If anything critical is missing, treat as "no usable trend"
+    if ma_align is None or persistence is None or dist_pct is None or slope_pct is None:
+        # optional: add a logger.debug here instead of silently returning 0
+        return 0.0
 
     # --- Component scores ---
     s_align = _ma_alignment_score(ma_align)
