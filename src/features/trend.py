@@ -154,4 +154,5 @@ def compute_trend_features(bars: Sequence[Bar]) -> FeatureDict:
         "trend_persistence": persistence,
         "trend_distance_from_ma_pct": dist_pct,
         "trend_ma_slope_pct": slope_pct,
+        "has_trend__data": 1.0 if len(bars) >= 60 else 0.0,
     }

@@ -65,5 +65,7 @@ class ScoreBundle:
     features: Dict[str, Any] = field(default_factory=dict)
     scores: Dict[str, float] = field(default_factory=dict)
     confluence_score: float = 0.0
+    confidence: Optional[float] = None
+    regime: Optional[str] = None
+    weights: Dict[str, float] = field(default_factory=dict)
     patterns: List[str] = field(default_factory=list)
-

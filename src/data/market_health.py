@@ -120,6 +120,9 @@ def compute_market_health(
     risk_on = max(0.0, min(100.0, risk_on))
 
     # ---- Regime classification ----
+    #regime = MarketHealth.classify_regime something like that for future
+
+
     if risk_on >= 65.0 and breadth_pct >= 60.0 and btc_trend_score >= 60.0:
         regime = "bull"
     elif risk_on <= 35.0 and breadth_pct <= 40.0 and btc_trend_score <= 40.0:

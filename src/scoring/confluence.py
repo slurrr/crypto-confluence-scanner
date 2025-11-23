@@ -49,11 +49,18 @@ class ConfluenceScoreResult:
     component_scores:
         The component scores that were fed into the computation
         (typically ScoreBundle.scores).
+
+    confidence:
+        Fraction (0-1) of component scores that are actually available for
+        this symbol relative to the number of expected components in the
+        regime weights. For example, if 4 out of 5 weighted components have
+        usable scores, confidence = 4/5 = 0.8.
     """
     confluence_score: float
     regime: Optional[str]
     weights: Dict[str, float]
     component_scores: Dict[str, float]
+    confidence: float
 
 
 # ---------------------------------------------------------------------------
@@ -223,12 +230,21 @@ def compute_confluence_score(
             regime=regime,
             weights={},
             component_scores=working_scores,
+            confidence=0.0,
         )
 
     num = 0.0
-    denom = 0.0
+    used_weight = 0.0
+    total_weight = 0.0
 
     for name, w in effective_weights.items():
+        try:
+            w_float = float(w)
+        except (TypeError, ValueError):
+            continue
+
+        total_weight += w_float
+
         value = working_scores.get(name)
         if value is None:
             continue
@@ -236,20 +252,28 @@ def compute_confluence_score(
             v = float(value)
         except (TypeError, ValueError):
             continue
-        num += w * v
-        denom += w
-
-    c = num / denom if denom else 0.0
+        num += w_float * v
+        used_weight += w_float
+        '''
+        for score in working_scores.values():
+            if score.get("has_data") == 1.0:
+                has_data += 1
+        '''
+    c = num / used_weight if used_weight else 0.0
 
     # Clamp into [0, 100]
     if c < 0.0:
         c = 0.0
     elif c > 100.0:
         c = 100.0
-
+    '''
+    total_scores = len(working_scores)
+    confidence = has_data / total_scores if working_scores else 0.0
+    '''
     return ConfluenceScoreResult(
         confluence_score=c,
         regime=regime,
         weights=effective_weights,
         component_scores=working_scores,
+        confidence=None,
     )

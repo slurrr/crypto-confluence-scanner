@@ -171,4 +171,5 @@ def compute_volatility_features(bars: Sequence[Bar]) -> FeatureDict:
         "volatility_atr_pct_14": atr_pct_14,
         "volatility_bb_width_pct_20": bb_width_pct_20,
         "volatility_contraction_ratio_60_20": contraction_ratio_60_20,
+        "has_vola_data": 1.0 if len(bars) >= 80 else 0.0,
     }

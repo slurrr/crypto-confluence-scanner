@@ -94,6 +94,7 @@ def compute_rs_features(
         "rs_ret_20_pct": ret_20,
         "rs_ret_60_pct": ret_60,
         "rs_ret_120_pct": ret_120,
+        "has_rs_data": 1.0 if len(bars) > 40 else 0.0,
     }
 
     # v2: we can add cross-sectional keys here once universe_returns is wired.

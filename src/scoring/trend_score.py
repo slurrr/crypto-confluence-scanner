@@ -1,9 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
+
+#from features.volume import FeatureDict
 from ..data.models import Bar
 from ..features.trend import compute_trend_features
 from collections.abc import Mapping
+
+FeatureDict = Dict[str, float]
 
 @dataclass
 class TrendScoreResult:
@@ -68,7 +72,7 @@ def _ma_slope_score(slope_pct: float, max_abs: float = 5.0) -> float:
     return normalized * 100.0
 
 
-def compute_trend_score(features: Dict[str, float]) -> TrendScoreResult:
+def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
     """
     Core Trend scoring API.
 

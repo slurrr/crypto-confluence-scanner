@@ -134,10 +134,11 @@ def run_scan(config_path: str = "config.yaml") -> None:
 
         for b in bundles:
             logging.info(
-                "Score %s %s -> confluence=%.2f scores=%s",
+                "Score %s %s -> confluence=%.2f, confidence=%s scores=%s",
                 b.symbol,
                 b.timeframe,
                 b.confluence_score,
+                b.confluence_confidence,
                 b.scores,
             )
 

@@ -132,4 +132,5 @@ def compute_volume_features(bars: Sequence[Bar]) -> FeatureDict:
         "volume_rvol_20_1": rvol,
         "volume_trend_slope_pct_20_10": slope_pct,
         "volume_percentile_60": vol_pct,
+        "has_volu_data": 1.0 if len(bars) >= 40 else 0.0,
     }

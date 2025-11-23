@@ -100,10 +100,6 @@ git push origin main
 
 ```
 
-> Tip: Always `git pull` after switching to a branch.
-
----
-
 ## Undo / Discard
 
 ### Discard changes in a single file (revert to last commit)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from attr import has
+
 from ..data.models import ScoreBundle
 from ..data.repository import DataRepository
 
@@ -17,6 +19,11 @@ from ..scoring.volatility_score import compute_volatility_score
 from ..scoring.rs_score import compute_relative_strength_score
 from ..scoring.positioning_score import compute_positioning_score
 from ..scoring.confluence import compute_confluence_score
+
+from pprint import pprint
+from dataclasses import asdict
+
+
 
 
 # ---------- Feature assembly ----------
@@ -78,6 +85,13 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
 
     return scores
 
+# ---------- Confidence assembly ----------
+
+def compute_confluence_confidence(features):
+    keys = [k for k in features if k.startswith("has_")]
+    flags = [features.get(k, 0) >= 1 for k in keys]
+    return sum(flags) / len(flags)
+
 
 # ---------- ScoreBundle builders ----------
 
@@ -96,33 +110,46 @@ def build_score_bundle_for_bars(
     Pure function: from bars (+ optional context) -> ScoreBundle.
     Does NOT touch repositories.
     """
+    # 1) compute features
     features = compute_all_features(
         bars,
         universe_returns=universe_returns,
         derivatives=derivatives,
     )
+
+    # 2) compute component scores
     scores = compute_all_scores(features)
 
-
-    # confluence_cfg = cfg.get("confluence", {}) if cfg else {}
-    conf_result = compute_confluence_score(
-        scores=scores,
-        weights=weights,   # optional explicit override
-        regime=regime,     # already resolved by MarketHealth
-        cfg=cfg,
-    )
-
-    confluence = conf_result.confluence_score
-
-
-    return ScoreBundle(
+    # 3) build base bundle
+    bundle = ScoreBundle(
         symbol=symbol,
         timeframe=timeframe,
         features=features,
         scores=scores,
-        confluence_score=confluence,
-        patterns=[],  # hook for pattern detection later
     )
+
+    # 4) compute confluence
+    conf = compute_confluence_score(
+        scores=bundle.scores,
+        regime=regime,
+        cfg=cfg,
+        weights=weights,
+    )
+
+    # 5) compute confidence
+    confidence = compute_confluence_confidence(features)
+
+
+    # 6) attach metadata onto ScoreBundle
+    bundle.confluence_score = conf.confluence_score
+    bundle.confidence = confidence
+    bundle.regime = conf.regime
+    bundle.weights = conf.weights
+
+    print("\n--- Debug ScoreBundle ---")
+    pprint(asdict(bundle), width=120)
+
+    return bundle
 
 
 def build_score_bundle_from_repo(

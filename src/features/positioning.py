@@ -31,7 +31,7 @@ def compute_positioning_features(
         - positioning_has_derivatives_data: float (0.0 or 1.0) for convenience
     """
     if derivatives is None:
-        return {}
+        return {"has_deriv_data": 0.0}
 
     has_any = any(
         v is not None
@@ -44,7 +44,7 @@ def compute_positioning_features(
     )
 
     if not has_any:
-        return {}
+        return {"has_deriv_data": 0.0}
 
     funding_rate = derivatives.funding_rate or 0.0
     oi_change = derivatives.oi_change or 0.0
@@ -52,5 +52,5 @@ def compute_positioning_features(
     return {
         "positioning_funding_rate": funding_rate,
         "positioning_oi_change_pct": oi_change,
-        "positioning_has_derivatives_data": 1.0,
+        "has_deriv_data": 1.0 if has_any else 0.0,
     }
