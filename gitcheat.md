@@ -81,6 +81,29 @@ git checkout feature/my-feature-name
 
 ---
 
+### Merge branches
+```bash
+# 1) Make sure you're up to date
+git checkout feature/data-layer
+git pull
+
+# 2) Switch to main
+git checkout main
+git pull
+
+# 3) Merge the branch
+git merge feature/data-layer
+
+# 4) Push
+git push origin main
+
+
+```
+
+> Tip: Always `git pull` after switching to a branch.
+
+---
+
 ## Undo / Discard
 
 ### Discard changes in a single file (revert to last commit)
