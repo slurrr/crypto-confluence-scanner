@@ -7,6 +7,8 @@ from ..data.models import Bar
 
 FeatureDict = Dict[str, float]
 
+MIN_VOLUME_BARS = 40
+
 
 def _volumes(bars: List[Bar]) -> List[float]:
     return [b.volume for b in bars]
@@ -118,16 +120,15 @@ def compute_volume_features(bars: Sequence[Bar]) -> FeatureDict:
         - volume_trend_slope_pct_20_10
         - volume_percentile_60
     """
-    # Match the earlier scoring behavior: require some history, or return neutral.
-    if len(bars) < 40:
+    bars_list = list(bars)
+    # Require enough history for 60-bar percentile plus MA slope
+    if len(bars_list) < MIN_VOLUME_BARS:
         return {
             "volume_rvol_20_1": 1.0,
             "volume_trend_slope_pct_20_10": 0.0,
             "volume_percentile_60": 0.5,
-            "has_volu_data": 0.0,
+            "has_volume_data": 0.0,
         }
-
-    bars_list = list(bars)
 
     rvol = compute_rvol(bars_list, lookback=20, recent_window=1)
     slope_pct = compute_volume_trend_slope(bars_list, ma_period=20, lookback=10)
@@ -137,5 +138,5 @@ def compute_volume_features(bars: Sequence[Bar]) -> FeatureDict:
         "volume_rvol_20_1": rvol,
         "volume_trend_slope_pct_20_10": slope_pct,
         "volume_percentile_60": vol_pct,
-        "has_volu_data": 1.0,
+        "has_volume_data": 1.0,
     }

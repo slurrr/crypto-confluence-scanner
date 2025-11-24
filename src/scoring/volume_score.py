@@ -100,16 +100,18 @@ def compute_volume_score(features: FeatureDict) -> VolumeScoreResult:
     rvol = float(features.get("volume_rvol_20_1", 0.0))
     slope_pct = float(features.get("volume_trend_slope_pct_20_10", 0.0))    
     vol_pct = float(features.get("volume_percentile_60", 0.5))
-    has_volu_data = float(features.get("has_volu_data", 0.0))
+    has_volume_data = float(
+        features.get("has_volume_data", features.get("has_volu_data", 0.0))
+    )
 
     # If we *don't* have real data, emit a neutral score.
-    if not has_volu_data:
-        default_score = 20.0  # middle of 0..100, adjust if you prefer
+    if not has_volume_data:
+        default_score = 50.0  # neutral default
         debug_features: Dict[str, float] = {
             "volume_rvol_20_1": rvol,
             "volume_trend_slope_pct_20_10": slope_pct,
             "volume_percentile_60": vol_pct,
-            "has_volu_data": has_volu_data,
+            "has_volume_data": has_volume_data,
         }
         return VolumeScoreResult(score=default_score, features=debug_features)
 
@@ -134,6 +136,7 @@ def compute_volume_score(features: FeatureDict) -> VolumeScoreResult:
         "volume_rvol_score": s_rvol,
         "volume_trend_slope_score": s_slope,
         "volume_percentile_score": s_pct,
+        "has_volume_data": has_volume_data,
     }
     #print(debug_features)
     return VolumeScoreResult(score=_clamp(score), features=debug_features)

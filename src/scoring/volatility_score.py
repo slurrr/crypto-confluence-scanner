@@ -4,8 +4,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
-from attr import has
-
 from ..data.models import Bar
 from ..features.volatility import compute_volatility_features
 
@@ -85,15 +83,17 @@ def compute_volatility_score(features: FeatureDict) -> VolatilityScoreResult:
     atr_pct = float(features.get("volatility_atr_pct_14", 0.0))
     bb_width_pct = float(features.get("volatility_bb_width_pct_20", 0.0))
     contraction_ratio = float(features.get("volatility_contraction_ratio_60_20", 1.0))
-    has_vola_data = float(features.get("has_vola_data", 0.0))
+    has_volatility_data = float(
+        features.get("has_volatility_data", features.get("has_vola_data", 0.0))
+    )
 
-    if not has_vola_data:
+    if not has_volatility_data:
         default_score = 50.0  # middle of 0..100, adjust if you prefer
         debug_features: Dict[str, float] = {
             "volatility_atr_pct_14": atr_pct,
             "volatility_bb_width_pct_20": bb_width_pct,
             "volatility_contraction_ratio_60_20": contraction_ratio,
-            "has_vola_data": has_vola_data,
+            "has_volatility_data": has_volatility_data,
         }
         return VolatilityScoreResult(score=default_score, features=debug_features)
 
@@ -117,6 +117,7 @@ def compute_volatility_score(features: FeatureDict) -> VolatilityScoreResult:
         "volatility_atr_score": s_atr,
         "volatility_bb_width_score": s_bb,
         "volatility_contraction_ratio_score": s_contr,
+        "has_volatility_data": has_volatility_data,
     }
     #print(debug_features)
     return VolatilityScoreResult(score=_clamp(score), features=debug_features)

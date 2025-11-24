@@ -131,18 +131,21 @@ def compute_rs_features(
     Output:
         - dict of raw RS features with stable snake_case keys.
     """
-    # If not enough data, return neutral/default features.
-    features: FeatureDict = {
-            "rs_ret_20_pct": 0.0,
-            "rs_ret_60_pct": 0.0,
-            "rs_ret_120_pct": 0.0,
-            "rs_20_rank_pct": 50.0,
-            "rs_60_rank_pct": 50.0,
-            "rs_120_rank_pct": 50.0,
-            "has_rs_data": 0.0,
-        }
+    # Default (no data) payload
+    default_features: FeatureDict = {
+        "rs_ret_20_pct": 0.0,
+        "rs_ret_60_pct": 0.0,
+        "rs_ret_120_pct": 0.0,
+        "rs_20_rank_pct": 50.0,
+        "rs_60_rank_pct": 50.0,
+        "rs_120_rank_pct": 50.0,
+        "has_rs_data": 0.0,
+    }
 
-    bars_list = list(bars)    
+    bars_list = list(bars)
+    if len(bars_list) < _MIN_RS_BARS:
+        return default_features
+
     symbol = bars_list[0].symbol
     horizons = DEFAULT_RS_HORIZONS
 
@@ -160,6 +163,9 @@ def compute_rs_features(
         "rs_ret_60_pct": ret_60,
         "rs_ret_120_pct": ret_120,
         "has_rs_data": 1.0,
+        "rs_20_rank_pct": default_features["rs_20_rank_pct"],
+        "rs_60_rank_pct": default_features["rs_60_rank_pct"],
+        "rs_120_rank_pct": default_features["rs_120_rank_pct"],
     }
 
     if universe_returns is not None and symbol in universe_returns:

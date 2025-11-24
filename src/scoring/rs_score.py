@@ -4,8 +4,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
-from attr import has
-
 from ..data.models import Bar
 from ..features.relative_strength import compute_rs_features
 
@@ -143,10 +141,12 @@ def compute_relative_strength_score(
 
     if den == 0.0:
         # Still nothing usable; keep neutral.
+        debug_features["has_rs_data"] = has_rs_data
         return RelativeStrengthScoreResult(score=50.0, features=debug_features)
 
     score = _clamp(num / den)
     debug_features["rs_score_source"] = source
+    debug_features["has_rs_data"] = has_rs_data
     return RelativeStrengthScoreResult(score=score, features=debug_features)
 
 

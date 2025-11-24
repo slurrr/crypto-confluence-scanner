@@ -7,6 +7,8 @@ from ..data.models import Bar
 
 FeatureDict = Dict[str, float]
 
+MIN_VOLATILITY_BARS = 80
+
 
 def _true_range(prev_close: float, high: float, low: float) -> float:
     """
@@ -157,24 +159,25 @@ def compute_volatility_features(bars: Sequence[Bar]) -> FeatureDict:
         - volatility_bb_width_pct_20
         - volatility_contraction_ratio_60_20
     """
+    bars_list = list(bars)
     # Mirror the scoring requirement: need enough history for ATR + contraction.
-    if len(bars) < 80:
+    if len(bars_list) < MIN_VOLATILITY_BARS:
         return {
             "volatility_atr_pct_14": 0.0,
             "volatility_bb_width_pct_20": 0.0,
             "volatility_contraction_ratio_60_20": 1.0,
-            "has_vola_data": 0.0,
+            "has_volatility_data": 0.0,
         }
 
-    atr_pct_14 = compute_atr_percent(list(bars), period=14)
-    bb_width_pct_20 = compute_bb_width_percent(list(bars), period=20, std_dev=2.0)
+    atr_pct_14 = compute_atr_percent(bars_list, period=14)
+    bb_width_pct_20 = compute_bb_width_percent(bars_list, period=20, std_dev=2.0)
     contraction_ratio_60_20 = compute_volatility_contraction_ratio(
-        list(bars), window_long=60, window_short=20
+        bars_list, window_long=60, window_short=20
     )
 
     return {
         "volatility_atr_pct_14": atr_pct_14,
         "volatility_bb_width_pct_20": bb_width_pct_20,
         "volatility_contraction_ratio_60_20": contraction_ratio_60_20,
-        "has_vola_data": 1.0,
+        "has_volatility_data": 1.0,
     }

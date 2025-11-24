@@ -3,9 +3,10 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 #from features.volume import FeatureDict
+from collections.abc import Mapping
+
 from ..data.models import Bar
 from ..features.trend import compute_trend_features
-from collections.abc import Mapping
 
 FeatureDict = Dict[str, float]
 
@@ -103,7 +104,9 @@ def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
     persistence = float(features.get("trend_persistence", 0.5))
     dist_pct = float(features.get("trend_distance_from_ma_pct", 0.0))
     slope_pct = float(features.get("trend_ma_slope_pct", 0.0))
-    has_trend_data = float(features.get("has_trend__data", 0.0))
+    has_trend_data = float(
+        features.get("has_trend_data", features.get("has_trend__data", 0.0))
+    )
 
     # If we *don't* have real trend data, emit a neutral trend score.
     # Confluence confidence can then look at has_trend__data to down-weight this module.
@@ -115,7 +118,6 @@ def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
             "trend_distance_from_ma_pct": dist_pct,
             "trend_ma_slope_pct": slope_pct,
             "has_trend_data": has_trend_data,
-
         }
         return TrendScoreResult(score=default_score, features=debug_features)
 

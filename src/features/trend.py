@@ -1,8 +1,12 @@
 from __future__ import annotations
 from typing import Dict, List, Sequence
+
 from ..data.models import Bar
-from collections.abc import Mapping
+
 FeatureDict = Dict[str, float]
+
+# Require at least this many bars for "real" trend signals (MA50 + slope lookback).
+MIN_TREND_BARS = 60
 
 
 def _take_last(values: List[float], n: int) -> List[float]:
@@ -139,26 +143,26 @@ def compute_trend_features(bars: Sequence[Bar]) -> FeatureDict:
         - trend_distance_from_ma_pct: float, signed % from MA
         - trend_ma_slope_pct        : float, approx % change of MA over lookback
     """
-    # If we truly don't have enough data for this block to mean anything,
-    # return an empty dict and let the caller / scoring handle it gracefully.
-    if len(bars) < 60:
+    bars_list = list(bars)
+    if len(bars_list) < MIN_TREND_BARS:
+        # Not enough history -> neutral defaults with explicit has_data flag.
         return {
             "trend_ma_alignment": 0.0,
             "trend_persistence": 0.5,
             "trend_distance_from_ma_pct": 0.0,
             "trend_ma_slope_pct": 0.0,
-            "has_trend__data": 0.0,
+            "has_trend_data": 0.0,
         }
 
-    ma_align = compute_ma_alignment(bars, short_period=20, long_period=50)
-    persistence = compute_trend_persistence(bars, lookback=20)
-    dist_pct = compute_distance_from_ma(bars, ma_period=50)
-    slope_pct = compute_ma_slope_percent(bars, ma_period=50, lookback=5)
+    ma_align = compute_ma_alignment(bars_list, short_period=20, long_period=50)
+    persistence = compute_trend_persistence(bars_list, lookback=20)
+    dist_pct = compute_distance_from_ma(bars_list, ma_period=50)
+    slope_pct = compute_ma_slope_percent(bars_list, ma_period=50, lookback=5)
 
     return {
         "trend_ma_alignment": ma_align,
         "trend_persistence": persistence,
         "trend_distance_from_ma_pct": dist_pct,
         "trend_ma_slope_pct": slope_pct,
-        "has_trend_data": 1.0 if len(bars) >= 60 else 0.0,
+        "has_trend_data": 1.0,
     }

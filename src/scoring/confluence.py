@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Dict, Mapping, Optional
 
-# If config is totally missing, we’ll fall back to equal weights on these:
+# If config is totally missing, we'll fall back to equal weights on these:
 DEFAULT_SCORE_KEYS = [
     "trend_score",
     "volume_score",
@@ -12,7 +13,7 @@ DEFAULT_SCORE_KEYS = [
     "positioning_score",
 ]
 
-# Map short config names → canonical score keys used in ScoreBundle.scores
+# Map short config names -> canonical score keys used in ScoreBundle.scores
 SCORE_KEY_ALIASES: Dict[str, str] = {
     "trend": "trend_score",
     "trend_score": "trend_score",
@@ -24,6 +25,15 @@ SCORE_KEY_ALIASES: Dict[str, str] = {
     "rs_score": "rs_score",
     "positioning": "positioning_score",
     "positioning_score": "positioning_score",
+}
+
+# Map canonical score keys to availability flags expected in feature dicts.
+AVAILABILITY_ALIASES: Dict[str, tuple[str, ...]] = {
+    "trend_score": ("has_trend_data", "has_trend__data"),
+    "volume_score": ("has_volume_data", "has_volu_data"),
+    "volatility_score": ("has_volatility_data", "has_vola_data"),
+    "rs_score": ("has_rs_data",),
+    "positioning_score": ("has_positioning_data"),
 }
 
 
@@ -51,10 +61,10 @@ class ConfluenceScoreResult:
         (typically ScoreBundle.scores).
 
     confidence:
-        Fraction (0-1) of component scores that are actually available for
+        Percent (0-100) of component scores that are actually available for
         this symbol relative to the number of expected components in the
         regime weights. For example, if 4 out of 5 weighted components have
-        usable scores, confidence = 4/5 = 0.8.
+        usable scores, confidence = 4/5 = 80.
     """
     confluence_score: float
     regime: Optional[str]
@@ -165,6 +175,44 @@ def _resolve_regime_weights(
     return canonical
 
 
+def _build_availability_map(
+    *,
+    availability: Optional[Mapping[str, float]] = None,
+    features: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, float]:
+    """
+    Normalize availability flags to canonical score keys.
+    """
+    result: Dict[str, float] = {}
+
+    # Explicit availability map takes priority.
+    if availability:
+        for raw_key, val in availability.items():
+            canonical = SCORE_KEY_ALIASES.get(raw_key, raw_key)
+            try:
+                result[canonical] = float(val)
+            except (TypeError, ValueError):
+                continue
+
+    if features:
+        for score_key, flag_names in AVAILABILITY_ALIASES.items():
+            for flag in flag_names:
+                if flag not in features:
+                    continue
+                try:
+                    result[score_key] = float(features[flag])
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+    return result
+
+
+def build_availability_from_features(features: Mapping[str, Any]) -> Dict[str, float]:
+    """Public helper for pipeline/tests."""
+    return _build_availability_map(features=features)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -175,6 +223,8 @@ def compute_confluence_score(
     regime: Optional[str] = None,
     cfg: Optional[Mapping[str, Any]] = None,
     weights: Optional[Dict[str, float]] = None,
+    availability: Optional[Mapping[str, float]] = None,
+    features: Optional[Mapping[str, Any]] = None,
 ) -> ConfluenceScoreResult:
     """
     Compute a final confluence_score in the range [0, 100].
@@ -207,24 +257,24 @@ def compute_confluence_score(
 
     Returns
     -------
-    ConfluenceScoreResult
+        ConfluenceScoreResult
         Wrapper containing the final confluence_score plus regime,
         effective weights, and component scores.
     """
-
-    # Copy so we don't mutate the caller's dict
     working_scores: Dict[str, float] = dict(scores)
+    conf_section = _get_confluence_section(cfg)
+
+    # Decide which regime to use (fallback to config default)
+    if regime is None:
+        regime = _get_attr_or_key(conf_section, "default_regime", "sideways")
 
     # Decide which weights to use
     if weights is None:
-        if regime is None:
-            raise ValueError("regime is required when weights are not explicitly provided")
-        weights = _resolve_regime_weights(cfg, regime)
+        weights = _resolve_regime_weights(cfg, str(regime))
 
     effective_weights: Dict[str, float] = dict(weights or {})
 
     if not effective_weights:
-        # No weights at all -> return a structured zero, preserving inputs
         return ConfluenceScoreResult(
             confluence_score=0.0,
             regime=regime,
@@ -233,11 +283,17 @@ def compute_confluence_score(
             confidence=0.0,
         )
 
+    availability_map = _build_availability_map(
+        availability=availability,
+        features=features,
+    )
+
     num = 0.0
     used_weight = 0.0
     total_weight = 0.0
 
     for name, w in effective_weights.items():
+        canonical_name = SCORE_KEY_ALIASES.get(name, name)
         try:
             w_float = float(w)
         except (TypeError, ValueError):
@@ -245,35 +301,36 @@ def compute_confluence_score(
 
         total_weight += w_float
 
-        value = working_scores.get(name)
-        if value is None:
-            continue
+        # Determine if this component has usable data
+        flag_val = availability_map.get(canonical_name)
+        has_data = True if flag_val is None else flag_val >= 1.0
+
+        value = working_scores.get(canonical_name)
         try:
             v = float(value)
         except (TypeError, ValueError):
+            has_data = False
+            v = None
+
+        if not (has_data and v is not None and isfinite(v)):
             continue
+
         num += w_float * v
         used_weight += w_float
-        '''
-        for score in working_scores.values():
-            if score.get("has_data") == 1.0:
-                has_data += 1
-        '''
-    c = num / used_weight if used_weight else 0.0
+
+    confluence = num / used_weight if used_weight else 0.0
 
     # Clamp into [0, 100]
-    if c < 0.0:
-        c = 0.0
-    elif c > 100.0:
-        c = 100.0
-    '''
-    total_scores = len(working_scores)
-    confidence = has_data / total_scores if working_scores else 0.0
-    '''
+    confluence = max(0.0, min(100.0, confluence))
+
+    confidence = (
+        (used_weight / total_weight * 100.0) if total_weight > 0 else 0.0
+    )
+
     return ConfluenceScoreResult(
-        confluence_score=c,
+        confluence_score=confluence,
         regime=regime,
         weights=effective_weights,
         component_scores=working_scores,
-        confidence=None,
+        confidence=confidence,
     )

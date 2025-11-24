@@ -4,8 +4,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
-from attr import has
-
 from ..data.models import Bar, DerivativesMetrics
 from ..features.positioning import compute_positioning_features
 
@@ -24,29 +22,16 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 def _funding_crowding_score(funding_rate: float) -> float:
     """
-    Map perp funding rate to a 0–100 crowding score.
-
-    - funding_rate near 0 -> score ~100 (uncrowded)
-    - larger |funding_rate| -> lower score (more crowded)
-    - |funding_rate| >= max_abs -> score bottoms near 10
+    Contrarian mapping:
+    - Negative/cheap funding (crowded shorts) -> higher score
+    - Positive/expensive funding (crowded longs) -> lower score
     """
-    abs_fr = abs(funding_rate or 0.0)
+    if funding_rate is None:
+        return 50.0
 
-    # This is the "this is definitely crowded" threshold.
-    # 0.0005 = 0.05% per funding interval; tweak as you like.
-    max_abs = 0.0005
-
-    if abs_fr <= 0.0:
-        return 100.0
-
-    # Cap at max_abs so extreme outliers don't matter more than "very crowded"
-    if abs_fr >= max_abs:
-        return 10.0
-
-    # Linearly interpolate from 100 (at 0) down to 10 (at max_abs)
-    ratio = abs_fr / max_abs  # 0 → 1
-    score = 100.0 - 90.0 * ratio  # 100 → 10
-    return max(0.0, min(100.0, score))
+    fr = max(-0.003, min(0.003, float(funding_rate)))
+    # Map [-max_abs, max_abs] to [90, 10] around a 50 baseline
+    return _clamp(50.0 - (fr / 0.003) * 40.0)
 
 
 def _oi_build_up_score(oi_change: float) -> float:
@@ -76,7 +61,7 @@ def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
             dict from `compute_positioning_features(...)`, expected keys:
               - positioning_funding_rate
               - positioning_oi_change_pct
-              - positioning_has_derivatives_data
+              - has_positioning_data
 
     Output:
         PositioningScoreResult with:
@@ -92,27 +77,27 @@ def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
 
     funding_rate = features.get("positioning_funding_rate", 0.0)
     oi_change = features.get("positioning_oi_change_pct", 0.0)
-    has_deriv_data = features.get("has_deriv_data", 0.0)   
+    has_positioning_data = features.get("has_positioning_data", 0.0)
 
-    # Case: No real derivatives → emit neutral score
-    if not has_deriv_data:
+    # Case: No real derivatives -> emit neutral score
+    if not has_positioning_data:
         neutral_score = 50.0
         debug_features = {
             "positioning_funding_rate": funding_rate,
             "positioning_oi_change_pct": oi_change,
             "positioning_funding_crowding_score": 50.0,
             "positioning_oi_build_up_score": 50.0,
-            "has_deriv_data": has_deriv_data,   
+            "has_positioning_data": has_positioning_data,
         }
         return PositioningScoreResult(score=neutral_score, features=debug_features)
 
-    # Real data path    
+    # Real data path
     s_funding = _funding_crowding_score(funding_rate)
     s_oi = _oi_build_up_score(oi_change)
 
     # Blend weights (tunable later)
-    w_funding = 0.6
-    w_oi = 0.4
+    w_funding = 0.7
+    w_oi = 0.3
 
     score = w_funding * s_funding + w_oi * s_oi
 
@@ -123,6 +108,7 @@ def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
         # component scores
         "positioning_funding_crowding_score": s_funding,
         "positioning_oi_build_up_score": s_oi,
+        "has_positioning_data": has_positioning_data,
     }
     #print(debug_features)
 

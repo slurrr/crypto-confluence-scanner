@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from attr import has
-
 from ..data.models import ScoreBundle
 from ..data.repository import DataRepository
 
@@ -21,7 +19,10 @@ from ..scoring.volume_score import compute_volume_score
 from ..scoring.volatility_score import compute_volatility_score
 from ..scoring.rs_score import compute_relative_strength_score
 from ..scoring.positioning_score import compute_positioning_score
-from ..scoring.confluence import compute_confluence_score
+from ..scoring.confluence import (
+    compute_confluence_score,
+    build_availability_from_features,
+)
 
 from pprint import pprint
 from dataclasses import asdict
@@ -43,12 +44,15 @@ def compute_all_features(
     `universe_returns` should be a symbol->returns mapping computed once per run
     so RS can be ranked cross-sectionally.
     """
+    bars_list = list(bars)
 
-    feat_trend = compute_trend_features(bars)
-    feat_volume = compute_volume_features(bars)
-    feat_volatility = compute_volatility_features(bars)
-    feat_rs = compute_rs_features(bars, universe_returns=universe_returns)
-    feat_positioning = compute_positioning_features(bars, derivatives=derivatives)
+    feat_trend = compute_trend_features(bars_list)
+    feat_volume = compute_volume_features(bars_list)
+    feat_volatility = compute_volatility_features(bars_list)
+    feat_rs = compute_rs_features(bars_list, universe_returns=universe_returns)
+    feat_positioning = compute_positioning_features(
+        bars_list, derivatives=derivatives
+    )
 
     # Left-biased merge; later modules can override earlier keys if needed.
     features: Dict[str, Any] = {
@@ -67,32 +71,6 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
     """
     Run all score modules and merge results into a single dict.
     
-    Prolly get rid of this REQUIRED_KEYS check later and just let each
-    scoring function handle missing features gracefully.
-    REQUIRED_KEYS = [
-        "trend_ma_alignment",
-        "trend_persistence",
-        "trend_distance_from_ma_pct",
-        "trend_ma_slope_pct",
-        "volume_rvol_20_1",
-        "volume_trend_slope_pct_20_10",
-        "volume_percentile_60",
-        "volatility_atr_pct_14",
-        "volatility_bb_width_pct_20",
-        "volatility_contraction_ratio_60_20",
-        'rs_ret_20_pct',
-        'rs_ret_60_pct',
-        'rs_ret_120_pct',
-        'rs_20_rank_pct',
-        'rs_60_rank_pct',
-        'rs_120_rank_pct',
-        'has_trend_data',
-        'has_volu_data',
-        'has_vola_data',
-        'has_rs_data',
-        'has_deriv_data',
-    ]
-
     # If ANY required features are missing, skip scoring entirely
     for key in REQUIRED_KEYS:
         if key not in features:
@@ -124,9 +102,12 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
 # ---------- Confidence assembly ----------
 
 def compute_confluence_confidence(features):
-    keys = [k for k in features if k.startswith("has_")]
-    flags = [features.get(k, 0) >= 1 for k in keys]
-    return sum(flags) / len(flags)
+    availability_map = build_availability_from_features(features)
+    if not availability_map:
+        return 0.0
+
+    available = sum(1 for v in availability_map.values() if v >= 1.0)
+    return (available / len(availability_map)) * 100.0
 
 
 # ---------- ScoreBundle builders ----------
@@ -165,16 +146,18 @@ def build_score_bundle_for_bars(
     )
 
     # 4) compute confluence
+    availability = build_availability_from_features(features)
     conf = compute_confluence_score(
         scores=bundle.scores,
         regime=regime,
         cfg=cfg,
         weights=weights,
+        availability=availability,
+        features=features,
     )
 
     # 5) compute confidence
-    confidence = compute_confluence_confidence(features)
-
+    confidence = conf.confidence
 
     # 6) attach metadata onto ScoreBundle
     bundle.confluence_score = conf.confluence_score
