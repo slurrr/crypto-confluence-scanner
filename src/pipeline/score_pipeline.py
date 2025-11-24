@@ -66,16 +66,31 @@ def compute_all_features(
 def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
     """
     Run all score modules and merge results into a single dict.
-    """
+    
+    Prolly get rid of this REQUIRED_KEYS check later and just let each
+    scoring function handle missing features gracefully.
     REQUIRED_KEYS = [
         "trend_ma_alignment",
         "trend_persistence",
         "trend_distance_from_ma_pct",
         "trend_ma_slope_pct",
-        "volu_obv",
-        "vola_atr_pct",
-        "rs_rank_20",
-        "has_positioning_data",   # adjust to your field names
+        "volume_rvol_20_1",
+        "volume_trend_slope_pct_20_10",
+        "volume_percentile_60",
+        "volatility_atr_pct_14",
+        "volatility_bb_width_pct_20",
+        "volatility_contraction_ratio_60_20",
+        'rs_ret_20_pct',
+        'rs_ret_60_pct',
+        'rs_ret_120_pct',
+        'rs_20_rank_pct',
+        'rs_60_rank_pct',
+        'rs_120_rank_pct',
+        'has_trend_data',
+        'has_volu_data',
+        'has_vola_data',
+        'has_rs_data',
+        'has_deriv_data',
     ]
 
     # If ANY required features are missing, skip scoring entirely
@@ -83,7 +98,7 @@ def compute_all_scores(features: Dict[str, Any]) -> Dict[str, float]:
         if key not in features:
             # Skip this symbol
             return {}
-
+    """
     s_trend = compute_trend_score(features)
     s_volume = compute_volume_score(features)
     s_volatility = compute_volatility_score(features)

@@ -159,7 +159,12 @@ def compute_volatility_features(bars: Sequence[Bar]) -> FeatureDict:
     """
     # Mirror the scoring requirement: need enough history for ATR + contraction.
     if len(bars) < 80:
-        return {}
+        return {
+            "volatility_atr_pct_14": 0.0,
+            "volatility_bb_width_pct_20": 0.0,
+            "volatility_contraction_ratio_60_20": 1.0,
+            "has_vola_data": 0.0,
+        }
 
     atr_pct_14 = compute_atr_percent(list(bars), period=14)
     bb_width_pct_20 = compute_bb_width_percent(list(bars), period=20, std_dev=2.0)
@@ -171,5 +176,5 @@ def compute_volatility_features(bars: Sequence[Bar]) -> FeatureDict:
         "volatility_atr_pct_14": atr_pct_14,
         "volatility_bb_width_pct_20": bb_width_pct_20,
         "volatility_contraction_ratio_60_20": contraction_ratio_60_20,
-        "has_vola_data": 1.0 if len(bars) >= 80 else 0.0,
+        "has_vola_data": 1.0,
     }

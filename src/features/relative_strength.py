@@ -130,22 +130,19 @@ def compute_rs_features(
 
     Output:
         - dict of raw RS features with stable snake_case keys.
-
-    Keys (stable schema):
-        - rs_ret_20_pct
-        - rs_ret_60_pct
-        - rs_ret_120_pct
-        - rs_20_rank_pct (if universe context provided)
-        - rs_60_rank_pct (if universe context provided)
-        - rs_120_rank_pct (if universe context provided)
     """
-    if len(bars) < _MIN_RS_BARS:
-        return {}
+    # If not enough data, return neutral/default features.
+    features: FeatureDict = {
+            "rs_ret_20_pct": 0.0,
+            "rs_ret_60_pct": 0.0,
+            "rs_ret_120_pct": 0.0,
+            "rs_20_rank_pct": 50.0,
+            "rs_60_rank_pct": 50.0,
+            "rs_120_rank_pct": 50.0,
+            "has_rs_data": 0.0,
+        }
 
-    bars_list = list(bars)
-    if not bars_list:
-        return {}
-
+    bars_list = list(bars)    
     symbol = bars_list[0].symbol
     horizons = DEFAULT_RS_HORIZONS
 

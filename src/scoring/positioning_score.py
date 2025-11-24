@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
+from attr import has
+
 from ..data.models import Bar, DerivativesMetrics
 from ..features.positioning import compute_positioning_features
 
@@ -81,12 +83,30 @@ def compute_positioning_score(features: FeatureDict) -> PositioningScoreResult:
           - score: 0..100
           - features: dict of raw + component scores
     """
-    if not isinstance(features, Mapping) or not features:
-        return PositioningScoreResult(score=50.0, features={})
+    #Debugging Legacy callers
+    if not isinstance(features, Mapping):
+        raise TypeError(
+            f"compute_positioning_score expected FeatureDict, got {type(features)}. "
+            "Did you mean to call compute_trend_score_from_bars(bars)?"
+        )
 
     funding_rate = features.get("positioning_funding_rate", 0.0)
     oi_change = features.get("positioning_oi_change_pct", 0.0)
+    has_deriv_data = features.get("has_deriv_data", 0.0)   
 
+    # Case: No real derivatives → emit neutral score
+    if not has_deriv_data:
+        neutral_score = 50.0
+        debug_features = {
+            "positioning_funding_rate": funding_rate,
+            "positioning_oi_change_pct": oi_change,
+            "positioning_funding_crowding_score": 50.0,
+            "positioning_oi_build_up_score": 50.0,
+            "has_deriv_data": has_deriv_data,   
+        }
+        return PositioningScoreResult(score=neutral_score, features=debug_features)
+
+    # Real data path    
     s_funding = _funding_crowding_score(funding_rate)
     s_oi = _oi_build_up_score(oi_change)
 

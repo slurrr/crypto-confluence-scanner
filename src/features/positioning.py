@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from io import DEFAULT_BUFFER_SIZE
 from typing import Dict
+from unittest.mock import DEFAULT
 
 from ..data.models import Bar, DerivativesMetrics
 
 FeatureDict = Dict[str, float]
 
+DEFAULT_POSITIONING_FEATURES: FeatureDict = {
+    "positioning_funding_rate": 0.0,
+    "positioning_oi_change_pct": 0.0,
+    "has_deriv_data": 0.0,
+}
 
 def compute_positioning_features(
     bars: Sequence[Bar],  # unused for now, reserved for future extensions
@@ -15,42 +22,24 @@ def compute_positioning_features(
     """
     Canonical Positioning feature API.
 
-    Input:
-        - bars: OHLCV history for a single symbol/timeframe (oldest -> newest).
-                Currently unused for v1, but included to keep the standard
-                feature API shape.
-        - derivatives: DerivativesMetrics for this symbol (may be None).
-
-    Output:
-        - dict of raw positioning features with stable snake_case keys.
-
-    Keys (stable schema, v1):
-        - positioning_funding_rate        : float (raw funding_rate)
-        - positioning_oi_change_pct       : float (raw oi_change %, same units
-                                                as DerivativesMetrics)
-        - positioning_has_derivatives_data: float (0.0 or 1.0) for convenience
+    Returns a *full* stable-schema FeatureDict even if no derivatives data exists.
     """
+
+    # Case 1: No derivatives object at all → return neutral full schema
     if derivatives is None:
-        return {"has_deriv_data": 0.0}
+        return dict(DEFAULT_POSITIONING_FEATURES)
 
-    has_any = any(
-        v is not None
-        for v in (
-            derivatives.funding_rate,
-            derivatives.open_interest,
-            derivatives.funding_z,
-            derivatives.oi_change,
-        )
-    )
+    # Extract values safely
+    funding_rate = derivatives.funding_rate
+    oi_change = derivatives.oi_change
 
-    if not has_any:
-        return {"has_deriv_data": 0.0}
+    # Case 2: Derivatives exist but all fields are None → treat as "no real data"
+    if all(v is None for v in (funding_rate, oi_change)):
+        return dict(DEFAULT_POSITIONING_FEATURES)
 
-    funding_rate = derivatives.funding_rate or 0.0
-    oi_change = derivatives.oi_change or 0.0
-
+    # Case 3: Real derivative values exist → build full schema with actual values
     return {
-        "positioning_funding_rate": funding_rate,
-        "positioning_oi_change_pct": oi_change,
-        "has_deriv_data": 1.0 if has_any else 0.0,
+        "positioning_funding_rate": funding_rate or 0.0,
+        "positioning_oi_change_pct": oi_change or 0.0,
+        "has_deriv_data": 1.0,
     }

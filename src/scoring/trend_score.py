@@ -30,14 +30,15 @@ def _ma_alignment_score(alignment: float) -> float:
         +1 -> 100
     """
     return (alignment + 1.0) * 50.0
-
+    # -1 -> 0.0
+    # 1  -> 100.0
 
 def _persistence_score(persistence: float) -> float:
     """
     persistence in [0, 1] -> [0, 100]
     """
     return _clamp(persistence * 100.0)
-
+    #0.45 -> 45.0
 
 def _extension_score(distance_pct: float, ideal_band: float = 5.0) -> float:
     """
@@ -54,6 +55,7 @@ def _extension_score(distance_pct: float, ideal_band: float = 5.0) -> float:
     # Each extra 1% beyond ideal_band knocks off 5 pts (tunable)
     extra = dist - ideal_band
     return _clamp(100.0 - extra * 5.0)
+#10.89 -> ~45.55
 
 
 def _ma_slope_score(slope_pct: float, max_abs: float = 5.0) -> float:
@@ -70,7 +72,7 @@ def _ma_slope_score(slope_pct: float, max_abs: float = 5.0) -> float:
     s = max(-max_abs, min(max_abs, slope_pct))
     normalized = (s + max_abs) / (2 * max_abs)  # 0..1
     return normalized * 100.0
-
+    # -1.529 -> ~20.0
 
 def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
     """
@@ -96,25 +98,36 @@ def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
             "Did you mean to call compute_trend_score_from_bars(bars)?"
         )
     
-    # If features are missing (e.g., not enough bars), return neutral.
-    if features.get("has_trend__data", 0.0) < 1.0:
-        return TrendScoreResult(score=0.0, features={})
+    # Pull with safe defaults in case upstream didn't populate everything
+    ma_align = float(features.get("trend_ma_alignment", 0.0))
+    persistence = float(features.get("trend_persistence", 0.5))
+    dist_pct = float(features.get("trend_distance_from_ma_pct", 0.0))
+    slope_pct = float(features.get("trend_ma_slope_pct", 0.0))
+    has_trend_data = float(features.get("has_trend__data", 0.0))
 
-    ma_align = features["trend_ma_alignment"]
-    persistence = features["trend_persistence"]
-    dist_pct = features["trend_distance_from_ma_pct"]
-    slope_pct = features["trend_ma_slope_pct"]
+    # If we *don't* have real trend data, emit a neutral trend score.
+    # Confluence confidence can then look at has_trend__data to down-weight this module.
+    if not has_trend_data:
+        default_score = 50.0  # middle of 0..100, adjust if you prefer
+        debug_features: Dict[str, float] = {
+            "trend_ma_alignment": ma_align,
+            "trend_persistence": persistence,
+            "trend_distance_from_ma_pct": dist_pct,
+            "trend_ma_slope_pct": slope_pct,
+            "has_trend_data": has_trend_data,
 
-    # If anything critical is missing, treat as "no usable trend"
-    if ma_align is None or persistence is None or dist_pct is None or slope_pct is None:
-        # optional: add a logger.debug here instead of silently returning 0
-        return 0.0
+        }
+        return TrendScoreResult(score=default_score, features=debug_features)
 
     # --- Component scores ---
     s_align = _ma_alignment_score(ma_align)
+    # -1 -> 0
     s_persist = _persistence_score(persistence)
+    # 0.45 -> 45.0
     s_dist = _extension_score(dist_pct, ideal_band=5.0)
+    # 10.89 -> ~45.55
     s_slope = _ma_slope_score(slope_pct, max_abs=5.0)
+    # -1.529 -> ~20.0
 
     # --- Weighted blend (weights can be tuned later) ---
     w_align = 0.35
@@ -124,9 +137,14 @@ def compute_trend_score(features: FeatureDict) -> TrendScoreResult:
 
     score = (
         w_align * s_align
+        # 0.35 * 0 = 0
         + w_persist * s_persist
+        # 0.30 * 45.0 = 13.5
         + w_dist * s_dist
+        # 0.20 * 45.55 = 9.11
         + w_slope * s_slope
+        # 0.15 * 20.0 = 3.0
+        # score ~= 25.61
     )
     
     debug_features: Dict[str, float] = {

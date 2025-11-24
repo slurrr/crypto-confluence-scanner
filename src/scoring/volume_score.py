@@ -92,12 +92,27 @@ def compute_volume_score(features: FeatureDict) -> VolumeScoreResult:
           - features: dict of raw + component scores
     """
     if not isinstance(features, Mapping) or not features:
-        # Not enough data -> neutral-ish
-        return VolumeScoreResult(score=50.0, features={})
+        raise TypeError(
+            f"compute_volume_score expected FeatureDict, got {type(features)}. "
+            "Did you mean to call compute_trend_score_from_bars(bars)?"
+        )
 
-    rvol = features["volume_rvol_20_1"]
-    slope_pct = features["volume_trend_slope_pct_20_10"]
-    vol_pct = features["volume_percentile_60"]
+    rvol = float(features.get("volume_rvol_20_1", 0.0))
+    slope_pct = float(features.get("volume_trend_slope_pct_20_10", 0.0))    
+    vol_pct = float(features.get("volume_percentile_60", 0.5))
+    has_volu_data = float(features.get("has_volu_data", 0.0))
+
+    # If we *don't* have real data, emit a neutral score.
+    if not has_volu_data:
+        default_score = 20.0  # middle of 0..100, adjust if you prefer
+        debug_features: Dict[str, float] = {
+            "volume_rvol_20_1": rvol,
+            "volume_trend_slope_pct_20_10": slope_pct,
+            "volume_percentile_60": vol_pct,
+            "has_volu_data": has_volu_data,
+        }
+        return VolumeScoreResult(score=default_score, features=debug_features)
+
 
     s_rvol = _rvol_score(rvol, ideal_low=1.5, ideal_high=3.0)
     s_slope = _volume_trend_score(slope_pct, max_abs=20.0)

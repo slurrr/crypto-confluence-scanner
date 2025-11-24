@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
+from attr import has
+
 from ..data.models import Bar
 from ..features.volatility import compute_volatility_features
 
@@ -75,12 +77,25 @@ def compute_volatility_score(features: FeatureDict) -> VolatilityScoreResult:
           - features: dict of raw + component scores
     """
     if not isinstance(features, Mapping) or not features:
-        # Not enough data -> neutral-ish
-        return VolatilityScoreResult(score=50.0, features={})
+        raise TypeError(
+            f"compute_volatility_score expected FeatureDict, got {type(features)}. "
+            "Did you mean to call compute_trend_score_from_bars(bars)?"
+        )
 
-    atr_pct = features["volatility_atr_pct_14"]
-    bb_width_pct = features["volatility_bb_width_pct_20"]
-    contraction_ratio = features["volatility_contraction_ratio_60_20"]
+    atr_pct = float(features.get("volatility_atr_pct_14", 0.0))
+    bb_width_pct = float(features.get("volatility_bb_width_pct_20", 0.0))
+    contraction_ratio = float(features.get("volatility_contraction_ratio_60_20", 1.0))
+    has_vola_data = float(features.get("has_vola_data", 0.0))
+
+    if not has_vola_data:
+        default_score = 50.0  # middle of 0..100, adjust if you prefer
+        debug_features: Dict[str, float] = {
+            "volatility_atr_pct_14": atr_pct,
+            "volatility_bb_width_pct_20": bb_width_pct,
+            "volatility_contraction_ratio_60_20": contraction_ratio,
+            "has_vola_data": has_vola_data,
+        }
+        return VolatilityScoreResult(score=default_score, features=debug_features)
 
     s_atr = _inverse_scale_score(atr_pct, scale=5.0)
     s_bb = _inverse_scale_score(bb_width_pct, scale=10.0)

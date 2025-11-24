@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Dict
 
+from attr import has
+
 from ..data.models import Bar
 from ..features.relative_strength import compute_rs_features
 
@@ -82,11 +84,21 @@ def compute_relative_strength_score(
           - score: 0..100
           - features: dict of raw + component scores
     """
-    if not features:
-        # Too little data; neutral-ish, empty features.
-        return RelativeStrengthScoreResult(score=50.0, features={})
-
+    #Debugging Legacy callers
+    if not isinstance(features, Mapping):
+        raise TypeError(
+            f"compute_rs_score expected FeatureDict, got {type(features)}. "
+            "Did you mean to call compute_trend_score_from_bars(bars)?"
+        )
+    
     debug_features: Dict[str, float] = {}
+
+    has_rs_data = float(features.get("has_rs_data", 0.0))
+    if not has_rs_data:
+        default_score = 50.0  # middle of 0..100, adjust if you prefer
+        debug_features = dict(features)
+        debug_features["rs_score_source"] = "default"
+        return RelativeStrengthScoreResult(score=default_score, features=debug_features)
 
     # First preference: cross-sectional percentile ranks.
     num = 0.0

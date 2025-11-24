@@ -142,7 +142,13 @@ def compute_trend_features(bars: Sequence[Bar]) -> FeatureDict:
     # If we truly don't have enough data for this block to mean anything,
     # return an empty dict and let the caller / scoring handle it gracefully.
     if len(bars) < 60:
-        return {}
+        return {
+            "trend_ma_alignment": 0.0,
+            "trend_persistence": 0.5,
+            "trend_distance_from_ma_pct": 0.0,
+            "trend_ma_slope_pct": 0.0,
+            "has_trend__data": 0.0,
+        }
 
     ma_align = compute_ma_alignment(bars, short_period=20, long_period=50)
     persistence = compute_trend_persistence(bars, lookback=20)
@@ -154,5 +160,5 @@ def compute_trend_features(bars: Sequence[Bar]) -> FeatureDict:
         "trend_persistence": persistence,
         "trend_distance_from_ma_pct": dist_pct,
         "trend_ma_slope_pct": slope_pct,
-        "has_trend__data": 1.0 if len(bars) >= 60 else 0.0,
+        "has_trend_data": 1.0 if len(bars) >= 60 else 0.0,
     }

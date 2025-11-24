@@ -120,7 +120,12 @@ def compute_volume_features(bars: Sequence[Bar]) -> FeatureDict:
     """
     # Match the earlier scoring behavior: require some history, or return neutral.
     if len(bars) < 40:
-        return {}
+        return {
+            "volume_rvol_20_1": 1.0,
+            "volume_trend_slope_pct_20_10": 0.0,
+            "volume_percentile_60": 0.5,
+            "has_volu_data": 0.0,
+        }
 
     bars_list = list(bars)
 
@@ -132,5 +137,5 @@ def compute_volume_features(bars: Sequence[Bar]) -> FeatureDict:
         "volume_rvol_20_1": rvol,
         "volume_trend_slope_pct_20_10": slope_pct,
         "volume_percentile_60": vol_pct,
-        "has_volu_data": 1.0 if len(bars) >= 40 else 0.0,
+        "has_volu_data": 1.0,
     }
