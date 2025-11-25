@@ -43,11 +43,10 @@ class MarketHealth:
     regime: str
     btc_trend: Optional[float] = None
     breadth: Optional[float] = None
-    # Optional future expansions:
-    # volatility: float | None = None
-    # positioning: float | None = None
-    # risk_on: float | None = None
-
+    risk_on: Optional[float] = None  # NEW
+    # optional extras if you want:
+    # vol_comfort: Optional[float] = None
+    # avg_positioning: Optional[float] = None
 
 @dataclass
 class ScoreBundle:

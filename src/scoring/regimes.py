@@ -60,8 +60,9 @@ def classify_regime(
     # you can compute it OR remove the risk_on checks.
     # For now we assume you add risk_on later—safe fallback:
     if risk_on is None:
-        # simple fallback proxy
-        risk_on = (trend or 50.0 + breadth or 50.0) / 2
+        t = trend if trend is not None else 50.0
+        b = breadth if breadth is not None else 50.0
+        risk_on = (t + b) / 2.0
 
     # ---- Bull ----
     if (

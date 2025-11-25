@@ -105,8 +105,8 @@ def run_scan(config_path: str = "config.yaml") -> Dict[str, RankingOutput]:
 
     # Market health (regime detection)
     health = compute_market_health(repo, universe)
-    regime = classify_regime(health, cfg.get("regimes", {}))
-    log.info("Market regime: %s", regime)
+    #regime = classify_regime(health, cfg.get("regimes", {}))
+    log.info("Market regime: %s", health.regime)
 
     results_by_timeframe: Dict[str, RankingOutput] = {}
 
@@ -119,7 +119,7 @@ def run_scan(config_path: str = "config.yaml") -> Dict[str, RankingOutput]:
                 symbols=symbols,
                 timeframe=timeframe,
                 cfg=cfg,
-                regime=regime,
+                regime=health.regime,
                 derivatives_by_symbol=derivatives_by_symbol, 
                 # weights={"trend_score": 1.0},  # plug in from config if you add weights
                 # universe_returns=...,          # plug in later if/when you have it

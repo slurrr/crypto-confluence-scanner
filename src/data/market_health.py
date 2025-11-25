@@ -4,15 +4,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, Sequence, List, TYPE_CHECKING
 
 from .models import MarketHealth, SymbolMeta
-
 from ..scoring.trend_score import compute_trend_score_from_bars
 from ..scoring.volatility_score import compute_volatility_score_from_bars
 from ..scoring.positioning_score import (
     compute_positioning_score_from_bars_and_derivatives,
 )
+from ..scoring.regimes import classify_regime  # NEW
 
 if TYPE_CHECKING:
-    # Only imported for type hints; no runtime circular import
     from .repository import DataRepository
 
 
@@ -21,21 +20,20 @@ def compute_market_health(
     universe: Sequence[SymbolMeta] | None = None,
 ) -> MarketHealth:
     """
-    Compute a coarse-grained market regime signal using:
+    Compute a coarse-grained market health snapshot:
     - benchmark trend (BTC)
     - breadth (percentage of symbols in uptrend)
     - benchmark volatility comfort
     - average positioning across universe
     """
-    # Universe default
     if universe is None:
         universe = repo.discover_universe()
 
     universe = list(universe)
     if not universe:
-        return MarketHealth(regime="unknown", btc_trend=None, breadth=None)
+        # You can leave risk_on=None here; regimes.classify_regime will fall back
+        return MarketHealth(regime="unknown", btc_trend=None, breadth=None, risk_on=None)
 
-    # Timeframe: first configured, fallback to 1d
     timeframe = (
         repo.cfg.timeframes[0]
         if getattr(repo.cfg, "timeframes", None)
@@ -43,8 +41,6 @@ def compute_market_health(
     )
 
     symbols = [m.symbol for m in universe]
-
-    # Benchmark = BTC/USDT if present
     benchmark = "BTC/USDT" if "BTC/USDT" in symbols else symbols[0]
 
     # ---- Benchmark trend + vol ----
@@ -56,7 +52,6 @@ def compute_market_health(
     if bench_bars:
         t_res = compute_trend_score_from_bars(bench_bars)
         v_res = compute_volatility_score_from_bars(bench_bars)
-
         btc_trend_score = t_res.score
         btc_vol_score = v_res.score
     else:
@@ -71,7 +66,6 @@ def compute_market_health(
     for meta in universe:
         symbol = meta.symbol
 
-        # Trend
         try:
             bars = repo.fetch_ohlcv(symbol, timeframe, limit=200)
         except Exception:
@@ -85,7 +79,6 @@ def compute_market_health(
         if t_res.score >= 60.0:
             uptrend_count += 1
 
-        # Positioning (if derivatives exist)
         try:
             deriv = repo.get_derivatives_metrics(symbol)
             p_res = compute_positioning_score_from_bars_and_derivatives(bars, deriv)
@@ -96,8 +89,7 @@ def compute_market_health(
     breadth_pct = (uptrend_count / trend_valid) * 100.0 if trend_valid > 0 else 50.0
     avg_positioning = (
         sum(positioning_scores) / len(positioning_scores)
-        if positioning_scores else
-        50.0
+        if positioning_scores else 50.0
     )
 
     # ---- Benchmark volatility comfort ----
@@ -119,19 +111,16 @@ def compute_market_health(
     )
     risk_on = max(0.0, min(100.0, risk_on))
 
-    # ---- Regime classification ----
-    #regime = MarketHealth.classify_regime something like that for future
-
-
-    if risk_on >= 65.0 and breadth_pct >= 60.0 and btc_trend_score >= 60.0:
-        regime = "bull"
-    elif risk_on <= 35.0 and breadth_pct <= 40.0 and btc_trend_score <= 40.0:
-        regime = "bear"
-    else:
-        regime = "sideways"
-
-    return MarketHealth(
-        regime=regime,
+    # Build health snapshot first
+    health = MarketHealth(
+        regime="unknown",
         btc_trend=btc_trend_score,
         breadth=breadth_pct,
+        risk_on=risk_on,
     )
+
+    # Feed through configurable classifier
+    regime_cfg = getattr(repo.cfg, "regimes", None)
+    health.regime = classify_regime(health, cfg=regime_cfg)
+
+    return health
