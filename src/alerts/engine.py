@@ -12,7 +12,7 @@ from ..data.models import MarketHealth
 from .types import AlertEvent
 from .notifiers import dispatch_alerts
 from .state import load_alert_state, save_alert_state, filter_with_state
-from ..patterns.rsi_divergence import detect_rsi_divergence
+from ..patterns.rsi_divergence import detect_rsi_divergence_from_bars
 
 
 log = logging.getLogger(__name__)
@@ -192,15 +192,16 @@ def _build_symbol_alerts(
                 if not bars:
                     continue
 
-                div = detect_rsi_divergence(
+                div = detect_rsi_divergence_from_bars(
                     bars,
+                    timeframe=tf,
                     period=14,
                     lookback=rsi_lookback,
                     pivot_lookback=rsi_pivot_lb,
                     min_strength=rsi_min_strength,
                     max_bars_from_last=rsi_max_bars_from_last,
                     debug=rsi_debug,
-                    tz=rsi_tz
+                    timezone=rsi_tz,
                 )
 
 

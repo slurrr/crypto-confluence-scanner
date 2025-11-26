@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from turtle import pos
 from typing import Any, Dict, List, Tuple
+
+# from features import positioning
 
 from ..data.models import ScoreBundle
 
@@ -15,8 +18,10 @@ class FilterConfig:
     min_rs_score: float = 0.0
     min_volume_score: float = 0.0
     min_volatility_score: float = 0.0
+    min_positioning_score: float = 0.0  
     max_atr_pct: float | None = None
     max_bb_width_pct: float | None = None
+    min_confluence_score: float = 0.0
 
 
 def parse_filter_config(raw: Dict[str, Any] | None) -> FilterConfig:
@@ -26,6 +31,8 @@ def parse_filter_config(raw: Dict[str, Any] | None) -> FilterConfig:
         min_rs_score=float(raw.get("min_rs_score", 0.0)),
         min_volume_score=float(raw.get("min_volume_score", 0.0)),
         min_volatility_score=float(raw.get("min_volatility_score", 0.0)),
+        min_positioning_score=float(raw.get("min_positioning_score", 0.0)),
+        min_confluence_score=float(raw.get("min_confluence_score", 0.0)),
         max_atr_pct=(
             float(raw["max_atr_pct"]) if "max_atr_pct" in raw else None
         ),
@@ -53,6 +60,8 @@ def symbol_passes_filters(symbol_obj: Any, cfg: FilterConfig) -> Tuple[bool, Lis
     rs_val = float(scores.get("rs_score", 0.0))
     volume_val = float(scores.get("volume_score", 0.0))
     volatility_val = float(scores.get("volatility_score", 0.0))
+    positioning_val = float(scores.get("positioning_score", 0.0))
+    confluence_val = float(getattr(symbol_obj, "confluence_score", 0.0))
 
     if trend_val < cfg.min_trend_score:
         reasons.append(f"trend<{cfg.min_trend_score}")
@@ -62,6 +71,10 @@ def symbol_passes_filters(symbol_obj: Any, cfg: FilterConfig) -> Tuple[bool, Lis
         reasons.append(f"volume<{cfg.min_volume_score}")
     if volatility_val < cfg.min_volatility_score:
         reasons.append(f"volatility<{cfg.min_volatility_score}")
+    if positioning_val < cfg.min_positioning_score:
+        reasons.append(f"positioning<{cfg.min_positioning_score}")
+    if confluence_val < cfg.min_confluence_score:
+        reasons.append(f"confluence<{cfg.min_confluence_score}")
 
     def _first_feature(obj: Dict[str, Any], keys: List[str]) -> Any:
         for k in keys:

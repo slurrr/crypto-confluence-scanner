@@ -33,7 +33,7 @@ AVAILABILITY_ALIASES: Dict[str, tuple[str, ...]] = {
     "volume_score": ("has_volume_data", "has_volu_data"),
     "volatility_score": ("has_volatility_data", "has_vola_data"),
     "rs_score": ("has_rs_data",),
-    "positioning_score": ("has_positioning_data"),
+    "positioning_score": ("has_positioning_data",),
 }
 
 

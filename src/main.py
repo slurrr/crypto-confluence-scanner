@@ -14,7 +14,6 @@ from .data.exchange_api import CcxtExchangeAPI
 from .data.repository import DataRepository, DataRepositoryConfig
 from .pipeline.score_pipeline import compile_score_bundles_for_universe 
 from .data.market_health import compute_market_health
-from .scoring.regimes import classify_regime
 from .ranking.ranking import RankingOutput, rank_score_bundles
 from .reports.daily_report import generate_daily_report
 
@@ -96,17 +95,11 @@ def run_scan(config_path: str = "config.yaml") -> Dict[str, RankingOutput]:
     )
     
     derivatives_by_symbol = repo.fetch_derivatives_for_symbols(symbols)
-    '''
-    log.info("Sample derivatives (first 3): %s", {
-        s: derivatives_by_symbol.get(s)
-        for s in symbols[:3]
-    })
-    '''
 
     # Market health (regime detection)
     health = compute_market_health(repo, universe)
-    #regime = classify_regime(health, cfg.get("regimes", {}))
-    log.info("Market regime: %s", health.regime)
+    regime = health.regime
+    log.info("Market regime: %s", regime)
 
     results_by_timeframe: Dict[str, RankingOutput] = {}
 
@@ -119,7 +112,7 @@ def run_scan(config_path: str = "config.yaml") -> Dict[str, RankingOutput]:
                 symbols=symbols,
                 timeframe=timeframe,
                 cfg=cfg,
-                regime=health.regime,
+                regime=regime,
                 derivatives_by_symbol=derivatives_by_symbol, 
                 # weights={"trend_score": 1.0},  # plug in from config if you add weights
                 # universe_returns=...,          # plug in later if/when you have it

@@ -76,9 +76,9 @@ This checklist is structured to drop directly into your repo (e.g., `PROJECT_SPR
 - [  ] Collect results for ranking/reporting/alerts
 
 ### **3.3 Ranking & Filtering (`src/ranking/`)**
-- [ ] Ensure `filters.py` applies liquidity & feasibility filters
-- [ ] Ensure `ranking.py` sorts by:
-  - [ ] confluence score  
+- [ x ] Ensure `filters.py` applies liquidity & feasibility filters
+- [ x ] Ensure `ranking.py` sorts by:
+  - [ x ] confluence score  
   - [ ] RS score  
   - [ ] pattern presence  
 - [ x ] Support top-N selection via config

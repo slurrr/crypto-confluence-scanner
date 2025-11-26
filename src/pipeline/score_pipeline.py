@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from ..data.models import ScoreBundle
+from ..data.models import PatternSignal, ScoreBundle
 from ..data.repository import DataRepository
 
 from ..features.trend import compute_trend_features
@@ -23,6 +23,8 @@ from ..scoring.confluence import (
     compute_confluence_score,
     build_availability_from_features,
 )
+from ..patterns import get_enabled_patterns
+from ..patterns.base import PatternContext
 
 from pprint import pprint
 from dataclasses import asdict
@@ -110,6 +112,64 @@ def compute_confluence_confidence(features):
     return (available / len(availability_map)) * 100.0
 
 
+# ---------- Pattern evaluation ----------
+
+def resolve_patterns_cfg(cfg: dict) -> dict:
+    cfg = cfg or {}
+
+    if "patterns" in cfg:
+        return cfg["patterns"] or {}
+
+    profile = cfg.get("patterns_profile")
+    profiles = cfg.get("pattern_profiles") or {}
+
+    if profile and profile in profiles:
+        return profiles[profile] or {}
+
+    if len(profiles) == 1:
+        return next(iter(profiles.values())) or {}
+
+    return {}
+
+def evaluate_patterns_for_bundle(
+    bundle: ScoreBundle,
+    bars: List[Any],
+    cfg: Optional[Mapping[str, Any]] = None,
+) -> List[PatternSignal]:
+    """
+    Evaluate all enabled patterns for a given ScoreBundle + bar history.
+    """
+    if not bars:
+        bundle.pattern_signals = []
+        return []
+
+    patterns_cfg = (cfg or {}).get("patterns", {}) or {}
+    detectors = get_enabled_patterns(patterns_cfg)
+    if not detectors:
+        bundle.pattern_signals = []
+        return []
+
+    ctx = PatternContext(
+        symbol=bundle.symbol,
+        timeframe=bundle.timeframe,
+        bars=bars,
+        features=bundle.features,
+        scores=bundle.scores,
+        confluence_score=bundle.confluence_score,
+        regime=bundle.regime,
+    )
+
+    signals: List[PatternSignal] = []
+    for name, detector in detectors.items():
+        per_cfg = patterns_cfg.get(name) if isinstance(patterns_cfg, Mapping) else None
+        sig = detector(ctx, per_cfg)
+        if sig:
+            signals.append(sig)
+
+    bundle.pattern_signals = signals
+    return signals
+
+
 # ---------- ScoreBundle builders ----------
 
 def build_score_bundle_for_bars(
@@ -165,11 +225,7 @@ def build_score_bundle_for_bars(
     bundle.regime = conf.regime
     bundle.weights = conf.weights
 
-    print("\n--- Debug ScoreBundle ---")
-    pprint(asdict(bundle), width=120)
-
     return bundle
-
 
 def build_score_bundle_from_repo(
     repo: DataRepository,
@@ -197,7 +253,6 @@ def build_score_bundle_from_repo(
         regime=regime,
         weights=weights,
     )
-
 
 def compile_score_bundles_for_universe(
     repo: DataRepository,
@@ -227,6 +282,8 @@ def compile_score_bundles_for_universe(
     if universe_ctx is None:
         universe_ctx = compute_universe_returns(bars_by_symbol)
 
+    patterns_cfg = resolve_patterns_cfg(cfg)
+
     for symbol in symbol_list:
         derivatives = None
         if derivatives_by_symbol is not None:
@@ -242,6 +299,12 @@ def compile_score_bundles_for_universe(
             regime=regime,
             weights=weights,
         )
+
+        evaluate_patterns_for_bundle(
+            bundle,
+            bars_by_symbol.get(symbol, []),
+            cfg={"patterns": patterns_cfg},
+        )
         # DEBUG: show positioning inputs
         '''
         if symbol == symbols[0]:  # just one symbol to avoid spam
@@ -256,6 +319,11 @@ def compile_score_bundles_for_universe(
             )
         '''
         bundles.append(bundle)
+
+
+        print("\n--- Debug ScoreBundle ---")
+        pprint(asdict(bundle), width=120)
+
 
     return bundles
 
